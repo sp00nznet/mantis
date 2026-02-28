@@ -1,13 +1,13 @@
 # Configuration
 
-qwen-local stores its configuration and data at `~/.qwen-local/` (that's your home directory).
+Mantis stores its configuration and data at `~/.mantis/` (that's your home directory).
 
 ---
 
 ## Directory Layout
 
 ```
-~/.qwen-local/
+~/.mantis/
 ├── config.json           # Settings
 ├── conversations/        # Saved conversation histories
 │   ├── auth-refactor.json
@@ -53,14 +53,14 @@ Here's the full config with defaults:
 
 ```bash
 # Open in your editor
-code ~/.qwen-local/config.json
-nano ~/.qwen-local/config.json
-notepad %USERPROFILE%\.qwen-local\config.json
+code ~/.mantis/config.json
+nano ~/.mantis/config.json
+notepad %USERPROFILE%\.mantis\config.json
 ```
 
-Changes take effect on next qwen-local startup.
+Changes take effect on next Mantis startup.
 
-### Option 2: Use commands inside qwen-local
+### Option 2: Use commands inside Mantis
 
 ```
 > /model deepseek-coder-v2     # change model (takes effect immediately)
@@ -83,7 +83,7 @@ If you're running Ollama on another machine (like a GPU server on your network):
 }
 ```
 
-This is great if you have a beefy GPU machine but want to run qwen-local on your laptop. The model runs on the GPU machine, qwen-local runs wherever you're coding.
+This is great if you have a beefy GPU machine but want to run Mantis on your laptop. The model runs on the GPU machine, Mantis runs wherever you're coding.
 
 Make sure Ollama is bound to `0.0.0.0` on the remote machine:
 ```bash
@@ -108,7 +108,7 @@ Different models have different context windows. If you switch models, update `m
 
 ## Saved Conversations
 
-Conversations are stored as JSON files in `~/.qwen-local/conversations/`. Each file contains:
+Conversations are stored as JSON files in `~/.mantis/conversations/`. Each file contains:
 
 ```json
 {
@@ -139,11 +139,11 @@ These are plain JSON — you can back them up, share them, or inspect them with 
 
 ## Environment
 
-qwen-local respects the working directory you launch it from. That's the directory the model sees and where relative paths resolve to.
+Mantis respects the working directory you launch it from. That's the directory the model sees and where relative paths resolve to.
 
 ```bash
 cd ~/my-project
-qwen-local                  # Working directory: ~/my-project
+mantis                      # Working directory: ~/my-project
 
 # Or change it while running:
 > /cd src/backend            # Working directory: ~/my-project/src/backend

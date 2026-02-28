@@ -5,7 +5,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { createAgent } from './agent.js';
 import { setWorkingDirectory, getWorkingDirectory, setPlanMode, getPlanMode } from './tools.js';
-import { loadConfig, saveConfig, getConfig } from './config.js';
+import { loadConfig, saveConfig, getConfig, PROVIDERS } from './config.js';
 import { saveConversation, loadConversation, listConversations } from './conversation.js';
 import { getAllSkills, getSkill, saveSkill, deleteSkill, expandSkillPrompt, matchSkillCommand } from './skills.js';
 import { loadAllMemory, clearGlobalMemory, clearProjectMemory, getMemoryStats } from './memory.js';
@@ -16,6 +16,9 @@ let _isBusy = false;
 let _agent = null;
 let _aborted = false;
 let _cancelResolve = null; // resolves the cancel promise to win the race
+let _autoApprove = false;  // when true, skip confirmation prompts for tool calls
+let _rl = null;            // readline interface ref for confirmation prompts
+let _autonomousMode = false; // when true, running in autonomous mode
 
 // Process-level SIGINT fallback.
 // In raw mode, Ctrl+C produces byte 0x03 which readline handles (rl.on('SIGINT')).
@@ -52,22 +55,42 @@ export async function startCLI() {
   loadConfig();
   const config = getConfig();
 
-  console.log(colors.header('\n  qwen-local'));
-  console.log(colors.dim(`  Agentic coding assistant powered by ${config.model}\n`));
-  console.log(colors.dim(`  Working directory: ${cwd}`));
-  console.log(colors.dim(`  Model: ${config.model} via ${config.ollamaUrl}`));
-  console.log(colors.dim(`  Context limit: ${config.maxContextTokens.toLocaleString()} tokens`));
+  const providerInfo = PROVIDERS[config.provider] || PROVIDERS.local;
+  const providerLabel = config.provider === 'local'
+    ? `${config.ollamaUrl}`
+    : `${providerInfo.name}`;
+
+  // Mantis mascot — pad each line to 10 chars so info column aligns
+  const mascotRaw = [
+    '   \\_/    ',
+    '  (o.o)   ',
+    ' _/|\\_    ',
+    '/ / \\ \\   ',
+    '  / \\     ',
+    ' /   \\    ',
+  ];
+  const info = [
+    chalk.green.bold('MANTIS'),
+    colors.dim('Agentic coding assistant'),
+    '',
+    colors.dim(`Working directory: ${cwd}`),
+    colors.dim(`Model: ${config.model} via ${providerLabel}`),
+    colors.dim(`Context limit: ${config.maxContextTokens.toLocaleString()} tokens`),
+  ];
+  console.log();
+  const lines = Math.max(mascotRaw.length, info.length);
+  for (let i = 0; i < lines; i++) {
+    const m = mascotRaw[i] || '          ';
+    const t = info[i] || '';
+    console.log(`  ${chalk.green(m)}  ${t}`);
+  }
   console.log(colors.dim('  Type /help for commands, /exit to quit\n'));
 
   const agent = createAgent();
   _agent = agent;
   let multilineBuffer = null;
-  let skillDraftState = null; // for interactive skill creation
 
   // Keepalive: prevent the event loop from draining after AbortController.abort().
-  // Aborting a fetch can leave process.stdin in an unrefed/paused state, causing
-  // Node.js to think there's no more work and exit. This interval guarantees the
-  // process stays alive until we explicitly call process.exit().
   setInterval(() => {}, 60_000);
 
   const rl = readline.createInterface({
@@ -75,12 +98,11 @@ export async function startCLI() {
     output: process.stdout,
     terminal: true,
   });
+  _rl = rl;
 
   // Ctrl+C interrupt via rl.on('SIGINT').
-  // Registering on rl prevents readline from closing the interface.
   let _interruptedAt = 0;
   rl.on('SIGINT', () => {
-    // Debounce: ignore SIGINTs within 1s of an interrupt to prevent double-fire
     if (_interruptedAt && Date.now() - _interruptedAt < 1000) return;
 
     if (_isBusy) {
@@ -88,8 +110,6 @@ export async function startCLI() {
       _aborted = true;
       _isBusy = false;
       _agent.cancel();
-      // NO AbortController — abort() corrupts stdin raw mode on Windows,
-      // breaking all subsequent Ctrl+C detection. The stream drains naturally.
       if (_cancelResolve) { _cancelResolve(); _cancelResolve = null; }
     } else {
       console.log(colors.dim('\n  Goodbye!\n'));
@@ -97,7 +117,6 @@ export async function startCLI() {
     }
   });
 
-  // Helper to ask a question and get a response
   function ask(question) {
     return new Promise(resolve => {
       rl.question(colors.dim(`  ${question} `), answer => resolve(answer));
@@ -111,11 +130,9 @@ export async function startCLI() {
   }
 
   const prompt = () => {
-    // Defensive: restore raw mode and resume stdin in case anything corrupted them
     try { if (process.stdin.isTTY && !process.stdin.isRaw) process.stdin.setRawMode(true); } catch {}
     if (process.stdin.isPaused?.()) process.stdin.resume();
     rl.question(getPromptStr(), async (input) => {
-      // Ignore any input that arrives while busy (shouldn't normally happen)
       if (_isBusy) return;
 
       // --- Multiline input mode ---
@@ -163,16 +180,15 @@ export async function startCLI() {
     });
   };
 
-  // Ctrl+C is handled by rl.on('SIGINT') above:
-  // - During processing: interrupts and returns to prompt
-  // - At idle prompt: exits gracefully
-
   prompt();
 }
 
-async function handleUserInput(input, rl, agent) {
+async function handleUserInput(input, rl, agent, opts = {}) {
   _isBusy = true;
   _aborted = false;
+
+  const isAutonomous = opts.autonomous || false;
+  const maxLoops = isAutonomous ? 100 : 25;
 
   // Create a cancel promise — Ctrl+C resolves this to win the race against agent.chat()
   const cancelPromise = new Promise(resolve => { _cancelResolve = resolve; });
@@ -184,8 +200,8 @@ async function handleUserInput(input, rl, agent) {
   let tokenCount = 0;
   let streamStartTime = null;
   let verbIndex = Math.floor(Math.random() * THINKING_VERBS.length);
-  let textBuffer = '';       // Buffer text output — flush after response completes
-  let hasToolCalls = false;  // Set when onToolCall fires (structured or text-parsed)
+  let textBuffer = '';
+  let hasToolCalls = false;
 
   function getVerb() {
     return THINKING_VERBS[verbIndex % THINKING_VERBS.length];
@@ -200,16 +216,15 @@ async function handleUserInput(input, rl, agent) {
       const tps = streamElapsed > 0 ? (tokenCount / streamElapsed).toFixed(1) : '0.0';
       tokStr = colors.dim(` | ${tps} tok/s`);
     }
-    return colors.dim(`${verb}...`) + tokStr + colors.dim(` | ${formatDuration(elapsed * 1000)}`) + '  ' + colors.status('ctrl+c to interrupt');
+    const modeTag = isAutonomous ? colors.warning(' [AUTO]') : '';
+    return colors.dim(`${verb}...`) + tokStr + colors.dim(` | ${formatDuration(elapsed * 1000)}`) + '  ' + colors.status('ctrl+c to interrupt') + modeTag;
   }
 
-  // Start spinner IMMEDIATELY so the user sees feedback right away
   thinkingSpinner = ora({
     text: buildThinkingText(),
     indent: 2,
   }).start();
 
-  // Update spinner every second — cycle verb, update timer + token counter
   const thinkingInterval = setInterval(() => {
     if (thinkingSpinner) {
       verbIndex++;
@@ -219,22 +234,23 @@ async function handleUserInput(input, rl, agent) {
     }
   }, 1000);
 
+  // Auto-approve in autonomous mode
+  const prevAutoApprove = _autoApprove;
+  if (isAutonomous) _autoApprove = true;
+
   try {
     await Promise.race([cancelPromise, agent.chat(input, {
+      maxLoops,
       onToken: (count) => {
         if (!streamStartTime) streamStartTime = Date.now();
         tokenCount += count;
       },
       onText: (text) => {
         if (_aborted) return;
-        // Buffer text — don't display yet. If the model is writing tool calls
-        // as JSON text, we'll suppress the raw JSON and show clean formatted
-        // tool call output instead. If it's a normal text response (no tool
-        // calls), we flush the buffer after the response completes.
         textBuffer += text;
       },
-      onToolCall: (name, args) => {
-        if (_aborted) return;
+      onConfirmToolCall: async (name, args) => {
+        if (_aborted) return false;
         hasToolCalls = true;
         if (thinkingSpinner) {
           thinkingSpinner.stop();
@@ -246,6 +262,30 @@ async function handleUserInput(input, rl, agent) {
           hasOutput = false;
         }
         console.log('\n  ' + formatToolCall(name, args));
+
+        if (_autoApprove) return true;
+
+        // Defensive: restore raw mode before prompting
+        try { if (process.stdin.isTTY && !process.stdin.isRaw) process.stdin.setRawMode(true); } catch {}
+        if (process.stdin.isPaused?.()) process.stdin.resume();
+
+        return new Promise(resolve => {
+          _rl.question(colors.dim('  Execute? ') + colors.status('[Y]es / yes [a]lways / [n]o: '), (answer) => {
+            const a = answer.trim().toLowerCase();
+            if (a === 'a' || a === 'always' || a === 'yes always') {
+              _autoApprove = true;
+              resolve(true);
+            } else if (a === 'n' || a === 'no') {
+              console.log(colors.dim('  Skipped.'));
+              resolve(false);
+            } else {
+              resolve(true);
+            }
+          });
+        });
+      },
+      onToolCall: (name, args) => {
+        if (_aborted) return;
         spinner = ora({
           text: colors.dim(`Running ${name}...`),
           indent: 2,
@@ -272,17 +312,12 @@ async function handleUserInput(input, rl, agent) {
       },
       onThinking: (isThinking) => {
         if (_aborted) return;
-        // Don't stop the spinner — text is buffered so the spinner is the
-        // only feedback the user sees. It'll be stopped when tool calls
-        // appear, text is flushed, or the response completes.
         if (isThinking && !thinkingSpinner) {
           thinkingSpinner = ora({
             text: buildThinkingText(),
             indent: 2,
           }).start();
         }
-        // Note: we intentionally do NOT stop the spinner on isThinking=false.
-        // Text is buffered, so the spinner is the user's only feedback during generation.
       },
     })]);
   } catch (err) {
@@ -293,15 +328,15 @@ async function handleUserInput(input, rl, agent) {
     }
   }
 
-  // Always clean up the timer and spinners
+  // Restore auto-approve state
+  if (isAutonomous) _autoApprove = prevAutoApprove;
+
   clearInterval(thinkingInterval);
   if (thinkingSpinner) { thinkingSpinner.stop(); thinkingSpinner = null; }
   if (spinner) { spinner.stop(); spinner = null; }
 
   _cancelResolve = null;
 
-  // If interrupted by Ctrl+C, show message and return — caller calls prompt()
-  // Conversation history is preserved so the user can add context or redirect.
   if (_aborted) {
     _aborted = false;
     console.log(colors.warning('\n\n  Interrupted.'));
@@ -309,9 +344,6 @@ async function handleUserInput(input, rl, agent) {
     return;
   }
 
-  // Flush text buffer: if the model produced text but no tool calls, display it now.
-  // If tool calls were made (structured or text-parsed), the text was likely JSON
-  // tool call syntax that we suppress in favor of clean formatted output.
   if (textBuffer && !hasToolCalls) {
     if (thinkingSpinner) { thinkingSpinner.stop(); thinkingSpinner = null; }
     process.stdout.write('\n  ');
@@ -331,7 +363,8 @@ async function handleUserInput(input, rl, agent) {
   const tpsStr = streamStartTime && tokenCount > 0
     ? ` | ${(tokenCount / ((Date.now() - streamStartTime) / 1000)).toFixed(1)} tok/s`
     : '';
-  console.log(colors.status(`\n  ${formatDuration(elapsed)} | context: ${contextBar(stats.pct)} | ${stats.messageCount} msgs | ${stats.totalToolCalls} tool calls${tpsStr}`));
+  const modeStr = isAutonomous ? ' | AUTO' : '';
+  console.log(colors.status(`\n  ${formatDuration(elapsed)} | context: ${contextBar(stats.pct)} | ${stats.messageCount} msgs | ${stats.totalToolCalls} tool calls${tpsStr}${modeStr}`));
   console.log();
 }
 
@@ -380,10 +413,11 @@ async function handleCommand(cmd, rl, agent, ask) {
         memStats.projectExists ? `project: ${memStats.projectSize} chars` : null,
         memStats.globalExists ? `global: ${memStats.globalSize} chars` : null,
       ].filter(Boolean).join(', ') || 'none';
+      const providerInfo = PROVIDERS[config.provider] || PROVIDERS.local;
       console.log(`
   ${colors.header('Status')}
   Model:       ${config.model}
-  Ollama:      ${config.ollamaUrl}
+  Provider:    ${providerInfo.name} (${config.provider})
   Working dir: ${getWorkingDirectory()}
   Plan mode:   ${getPlanMode() ? colors.plan('ON') : 'off'}
   Context:     ${contextBar(stats.pct)} (${stats.used.toLocaleString()} / ${stats.max.toLocaleString()} tokens)
@@ -472,9 +506,219 @@ async function handleCommand(cmd, rl, agent, ask) {
       const config = getConfig();
       console.log(colors.header('\n  Configuration:'));
       for (const [key, value] of Object.entries(config)) {
-        console.log(colors.dim(`  ${key}: ${JSON.stringify(value)}`));
+        if (key === 'providerKeys') {
+          // Mask API keys
+          const masked = {};
+          for (const [k, v] of Object.entries(value)) {
+            masked[k] = v ? v.slice(0, 8) + '...' : '(not set)';
+          }
+          console.log(colors.dim(`  ${key}: ${JSON.stringify(masked)}`));
+        } else {
+          console.log(colors.dim(`  ${key}: ${JSON.stringify(value)}`));
+        }
       }
       console.log();
+      break;
+    }
+
+    // ─── Provider commands ───────────────────────────────────────
+
+    case '/provider': {
+      const subParts = args.split(/\s+/);
+      const sub = subParts[0]?.toLowerCase() || 'show';
+      const subArgs = subParts.slice(1).join(' ');
+
+      switch (sub) {
+        case 'show':
+        case '': {
+          const config = getConfig();
+          const p = PROVIDERS[config.provider] || PROVIDERS.local;
+          const hasKey = config.providerKeys?.[config.provider];
+          console.log(`
+  ${colors.header('Current Provider')}
+  Provider: ${colors.toolName(p.name)} (${config.provider})
+  Base URL: ${p.baseUrl}
+  Model:    ${config.model}
+  API Key:  ${p.requiresKey ? (hasKey ? colors.success('configured') : colors.error('not set — use /provider key')) : colors.dim('not required')}
+`);
+          break;
+        }
+
+        case 'list':
+        case 'ls': {
+          const config = getConfig();
+          console.log(colors.header('\n  Available Providers\n'));
+          for (const [key, p] of Object.entries(PROVIDERS)) {
+            const active = key === config.provider ? colors.success(' ← active') : '';
+            const keyStatus = p.requiresKey
+              ? (config.providerKeys?.[key] ? colors.dim(' [key set]') : colors.dim(' [no key]'))
+              : '';
+            console.log(`  ${colors.toolName(key.padEnd(12))} ${p.name}${keyStatus}${active}`);
+            console.log(colors.dim(`               ${p.description}`));
+          }
+          console.log(colors.dim('\n  Use /provider set <name> to switch providers.'));
+          console.log(colors.dim('  Use /provider key <name> <apikey> to set an API key.\n'));
+          break;
+        }
+
+        case 'set': {
+          const providerName = subArgs.trim().toLowerCase();
+          if (!providerName) {
+            console.log(colors.error('  Usage: /provider set <name>\n'));
+            break;
+          }
+          if (!PROVIDERS[providerName]) {
+            console.log(colors.error(`  Unknown provider: ${providerName}`));
+            console.log(colors.dim('  Use /provider list to see available providers.\n'));
+            break;
+          }
+          const p = PROVIDERS[providerName];
+          saveConfig({
+            provider: providerName,
+            model: p.defaultModel,
+          });
+          if (providerName === 'local') {
+            // For local, keep ollamaUrl as-is
+          }
+          agent.refreshSystemPrompt();
+          console.log(colors.success(`  Provider set to: ${p.name}`));
+          console.log(colors.dim(`  Model: ${p.defaultModel}`));
+          if (p.requiresKey && !getConfig().providerKeys?.[providerName]) {
+            console.log(colors.warning(`  Note: ${providerName} requires an API key. Use /provider key ${providerName} <your-key>`));
+          }
+          console.log();
+          break;
+        }
+
+        case 'key': {
+          const keyParts = subArgs.split(/\s+/);
+          const keyProvider = keyParts[0]?.toLowerCase();
+          const keyValue = keyParts.slice(1).join(' ').trim();
+          if (!keyProvider || !keyValue) {
+            console.log(colors.error('  Usage: /provider key <provider> <apikey>\n'));
+            break;
+          }
+          if (!PROVIDERS[keyProvider]) {
+            console.log(colors.error(`  Unknown provider: ${keyProvider}\n`));
+            break;
+          }
+          const config = getConfig();
+          const keys = { ...config.providerKeys, [keyProvider]: keyValue };
+          saveConfig({ providerKeys: keys });
+          console.log(colors.success(`  API key saved for ${keyProvider}.\n`));
+          break;
+        }
+
+        case 'test': {
+          const config = getConfig();
+          const p = PROVIDERS[config.provider] || PROVIDERS.local;
+          console.log(colors.dim(`  Testing connection to ${p.name}...`));
+
+          try {
+            const url = config.provider === 'local'
+              ? `${config.ollamaUrl}/v1/models`
+              : `${p.baseUrl}/models`;
+            const headers = { 'Content-Type': 'application/json' };
+            const apiKey = config.providerKeys?.[config.provider];
+            if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+            const response = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+            if (response.ok) {
+              const data = await response.json();
+              const modelCount = data.data?.length || 0;
+              console.log(colors.success(`  Connected! ${modelCount} models available.`));
+              if (modelCount > 0 && modelCount <= 20) {
+                const models = data.data.map(m => m.id).slice(0, 10);
+                console.log(colors.dim(`  Models: ${models.join(', ')}${modelCount > 10 ? '...' : ''}`));
+              }
+            } else {
+              console.log(colors.error(`  Connection failed (HTTP ${response.status})`));
+              if (response.status === 401) {
+                console.log(colors.dim('  Check your API key with /provider key'));
+              }
+            }
+          } catch (err) {
+            console.log(colors.error(`  Connection failed: ${err.message}`));
+          }
+          console.log();
+          break;
+        }
+
+        case 'models': {
+          const providerName = subArgs.trim().toLowerCase() || getConfig().provider;
+          const p = PROVIDERS[providerName];
+          if (!p) {
+            console.log(colors.error(`  Unknown provider: ${providerName}\n`));
+            break;
+          }
+          console.log(colors.dim(`  Fetching models from ${p.name}...`));
+
+          try {
+            const config = getConfig();
+            const url = providerName === 'local'
+              ? `${config.ollamaUrl}/v1/models`
+              : `${p.baseUrl}/models`;
+            const headers = { 'Content-Type': 'application/json' };
+            const apiKey = config.providerKeys?.[providerName];
+            if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+            const response = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+            if (response.ok) {
+              const data = await response.json();
+              const models = data.data || [];
+              if (models.length === 0) {
+                console.log(colors.dim('  No models found.'));
+              } else {
+                console.log(colors.header(`\n  Models on ${p.name} (${models.length} total)\n`));
+                for (const m of models.slice(0, 30)) {
+                  console.log(`  ${colors.toolName(m.id)}`);
+                }
+                if (models.length > 30) {
+                  console.log(colors.dim(`  ... and ${models.length - 30} more`));
+                }
+              }
+            } else {
+              console.log(colors.error(`  Failed (HTTP ${response.status})`));
+            }
+          } catch (err) {
+            console.log(colors.error(`  Failed: ${err.message}`));
+          }
+          console.log();
+          break;
+        }
+
+        default:
+          console.log(colors.error(`  Unknown provider command: ${sub}`));
+          console.log(colors.dim('  Available: show, list, set, key, test, models\n'));
+          break;
+      }
+      break;
+    }
+
+    // ─── Autonomous mode ─────────────────────────────────────────
+
+    case '/auto': {
+      if (!args) {
+        console.log(colors.error('  Usage: /auto <task description>'));
+        console.log(colors.dim('  Example: /auto create a hello world web server with Express\n'));
+        break;
+      }
+
+      console.log(colors.warning('\n  AUTONOMOUS MODE'));
+      console.log(colors.dim(`  Task: ${args}`));
+      console.log(colors.dim('  All tool calls will be auto-approved.'));
+      console.log(colors.dim('  Max iterations: 100'));
+      console.log(colors.dim('  Press Ctrl+C to interrupt at any time.\n'));
+
+      // Import and build the autonomous prompt
+      const { buildAutonomousPrompt } = await import('./prompt.js');
+      const autoPrompt = buildAutonomousPrompt(args);
+
+      _autonomousMode = true;
+      await handleUserInput(autoPrompt, rl, agent, { autonomous: true });
+      _autonomousMode = false;
+
+      console.log(colors.success('  Autonomous mode complete.\n'));
       break;
     }
 
@@ -653,7 +897,6 @@ async function handleCommand(cmd, rl, agent, ask) {
 
         case 'import': {
           console.log(colors.dim('  Paste the skill JSON, then enter """ to finish:'));
-          // This will be handled naturally by multiline mode
           console.log(colors.dim('  (Use """ to start and end the JSON block, or /skill create for interactive mode)\n'));
           break;
         }
@@ -803,7 +1046,6 @@ function printSkillList() {
   console.log(colors.header('\n  Available Skills'));
   console.log(colors.dim('  Invoke any skill by typing /name [args]\n'));
 
-  // Group by source
   const builtIn = skills.filter(s => s.source === 'built-in');
   const user = skills.filter(s => s.source === 'user');
   const project = skills.filter(s => s.source === 'project');
@@ -852,7 +1094,7 @@ function printHelp() {
   console.log(`
   ${colors.header('Commands')}
   ${colors.toolName('/help')}              Show this help
-  ${colors.toolName('/exit')}              Exit qwen-local
+  ${colors.toolName('/exit')}              Exit Mantis
   ${colors.toolName('/clear')}             Clear conversation history
   ${colors.toolName('/plan')}              Toggle plan mode (explore without changes)
   ${colors.toolName('/status')}            Show session status (tokens, model, etc.)
@@ -860,8 +1102,20 @@ function printHelp() {
   ${colors.toolName('/save [name]')}       Save conversation to disk
   ${colors.toolName('/load [name]')}       Load a saved conversation
   ${colors.toolName('/compact')}           Manually compact conversation history
-  ${colors.toolName('/model <name>')}      Switch to a different Ollama model
+  ${colors.toolName('/model <name>')}      Switch to a different model
   ${colors.toolName('/config')}            Show current configuration
+
+  ${colors.header('Providers')}
+  ${colors.toolName('/provider')}          Show current provider
+  ${colors.toolName('/provider list')}     List all available providers
+  ${colors.toolName('/provider set <n>')}  Switch provider (e.g. together, groq)
+  ${colors.toolName('/provider key <n> <k>')} Set API key for a provider
+  ${colors.toolName('/provider test')}     Test connection to current provider
+  ${colors.toolName('/provider models')}   List models on current provider
+
+  ${colors.header('Autonomous Mode')}
+  ${colors.toolName('/auto <task>')}       Run a task autonomously (no confirmations)
+  ${colors.dim('  Example: /auto create a todo app with React and Express')}
 
   ${colors.header('Memory')}
   ${colors.toolName('/memory')}            Show saved memory (project + global)
@@ -895,8 +1149,8 @@ function printHelp() {
   ${colors.header('Creating Skills')}
   ${colors.dim('Skills are reusable prompt templates saved as slash commands.')}
   ${colors.dim('Use /skill create to make one interactively. Skills can live in:')}
-  ${colors.dim('  ~/.qwen-local/skills/       (available everywhere)')}
-  ${colors.dim('  .qwen-local/skills/         (project-specific, shareable via git)')}
+  ${colors.dim('  ~/.mantis/skills/       (available everywhere)')}
+  ${colors.dim('  .mantis/skills/         (project-specific, shareable via git)')}
   ${colors.dim('Use {{args}} in prompts for argument substitution.')}
 
   ${colors.header('Examples')}
@@ -905,5 +1159,6 @@ function printHelp() {
   ${colors.dim('/commit Fixes auth token expiry bug')}
   ${colors.dim('/test npm run test:unit')}
   ${colors.dim('/explain src/auth/middleware.js')}
+  ${colors.dim('/auto create a REST API with Express')}
 `);
 }

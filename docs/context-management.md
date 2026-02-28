@@ -1,6 +1,6 @@
 # Context Management
 
-AI models have a limited "memory" — called the context window. qwen-local manages this automatically so you don't have to think about it.
+AI models have a limited "memory" — called the context window. Mantis manages this automatically so you don't have to think about it.
 
 ---
 
@@ -8,7 +8,7 @@ AI models have a limited "memory" — called the context window. qwen-local mana
 
 Every message you send, every file the model reads, every tool result — it all goes into the context window. The Qwen3-Coder model has a 32,768 token context window (roughly 25,000 words). In a busy coding session with lots of file reads and edits, you can fill that up fast.
 
-Without management, the model would simply crash with an error when the context overflows. That's a terrible experience. qwen-local does something better.
+Without management, the model would simply crash with an error when the context overflows. That's a terrible experience. Mantis does something better.
 
 ---
 
@@ -16,7 +16,7 @@ Without management, the model would simply crash with an error when the context 
 
 ### Token Tracking
 
-qwen-local estimates token usage for every message in the conversation. After each turn, you see the current usage in the status line:
+Mantis estimates token usage for every message in the conversation. After each turn, you see the current usage in the status line:
 
 ```
   2.1s | context: [============        ] 58% | 24 msgs | 7 tool calls
@@ -26,7 +26,7 @@ That bar shows how full your context window is. Green means plenty of room. Yell
 
 ### Auto-Compaction
 
-When the context reaches **75%** of the limit (configurable), qwen-local automatically compacts the conversation:
+When the context reaches **75%** of the limit (configurable), Mantis automatically compacts the conversation:
 
 1. **Keeps** the system prompt (always needed)
 2. **Summarizes** older messages into a condensed format
@@ -102,7 +102,7 @@ This is a full reset — no history, no summary, nothing. Use this when you're s
 
 ## Configuration
 
-In `~/.qwen-local/config.json`:
+In `~/.mantis/config.json`:
 
 ```json
 {
@@ -126,7 +126,7 @@ In `~/.qwen-local/config.json`:
 
 ## Token Estimation
 
-qwen-local estimates tokens using the rule of thumb: **~4 characters per token** for English text and code. This isn't perfectly accurate (different tokenizers vary), but it's close enough for context management. The goal is to compact *before* hitting the actual limit, not to count tokens precisely.
+Mantis estimates tokens using the rule of thumb: **~4 characters per token** for English text and code. This isn't perfectly accurate (different tokenizers vary), but it's close enough for context management. The goal is to compact *before* hitting the actual limit, not to count tokens precisely.
 
 ---
 

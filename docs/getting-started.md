@@ -6,11 +6,11 @@ Welcome! This guide will get you from zero to a working AI coding assistant in a
 
 ## What You're Setting Up
 
-qwen-local is three things working together:
+Mantis is three things working together:
 
 1. **Ollama** — Runs AI models on your machine (like Docker, but for AI)
 2. **Qwen3-Coder** — The AI model that understands code (lives inside Ollama)
-3. **qwen-local** — The agent layer that gives the model hands (reads files, writes code, runs commands)
+3. **Mantis** — The agent layer that gives the model hands (reads files, writes code, runs commands)
 
 The installer sets up all three. But if you like doing things manually, read on.
 
@@ -36,12 +36,12 @@ chmod +x installer/install-linux.sh
 
 ### What the installer does
 
-1. Asks where you want to install (default: `~/qwen-local`)
+1. Asks where you want to install (default: `~/mantis`)
 2. Asks CPU or GPU mode
 3. Checks for Ollama — installs it if missing
 4. Checks for Node.js v18+ — installs it if missing
 5. Copies the project files and runs `npm install`
-6. Links `qwen-local` as a global command
+6. Links `mantis` as a global command
 7. Pulls the AI model from Ollama's registry
 8. Done!
 
@@ -67,11 +67,11 @@ node --version
 # If not, grab it from https://nodejs.org
 ```
 
-### Install qwen-local
+### Install Mantis
 
 ```bash
 # Clone or copy the project
-cd qwen-local
+cd mantis
 
 # Install dependencies
 npm install
@@ -93,8 +93,8 @@ ollama serve &
 # Test the model
 ollama run qwen3-coder-cpu "Say hello"
 
-# Launch qwen-local
-qwen-local
+# Launch Mantis
+mantis
 ```
 
 ---
@@ -105,7 +105,7 @@ Open a terminal, navigate to any project, and start:
 
 ```bash
 cd ~/my-project
-qwen-local
+mantis
 ```
 
 You'll see the welcome screen. Try these in order:
@@ -137,7 +137,7 @@ It'll use `search_files` with a regex pattern and report what it finds.
 ### 4. Make a change
 
 ```
-> Create a file called hello.txt that says "qwen-local was here"
+> Create a file called hello.txt that says "Mantis was here"
 ```
 
 It'll use `write_file` to create the file. Check — it's really there.
@@ -189,15 +189,15 @@ ollama serve          # Linux
 # Windows: Ollama runs as a system service — check the tray icon
 ```
 
-### "qwen-local: command not found"
+### "mantis: command not found"
 
 The global link didn't stick. Try:
 ```bash
 # Option 1: Re-link
-cd ~/qwen-local && npm link
+cd ~/mantis && npm link
 
 # Option 2: Run directly
-node ~/qwen-local/bin/qwen-local.js
+node ~/mantis/bin/mantis.js
 ```
 
 ### Model is slow

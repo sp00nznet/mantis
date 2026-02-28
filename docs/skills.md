@@ -29,7 +29,7 @@ Pass arguments after the name:
 
 ## Built-in Skills
 
-qwen-local ships with 8 skills out of the box:
+Mantis ships with 8 skills out of the box:
 
 | Skill | Args | What it does |
 |-------|------|-------------|
@@ -125,7 +125,7 @@ qwen-local ships with 8 skills out of the box:
   Save as (u)ser skill or (p)roject skill? (u/p): p
 
   Skill "/deploy" created!
-  Saved to: D:\myproject\.qwen-local\skills\deploy.json
+  Saved to: D:\myproject\.mantis\skills\deploy.json
   Run it with: /deploy [environment]
 ```
 
@@ -177,9 +177,9 @@ Skills can live in three places, with increasing priority:
 
 | Scope | Location | Shared? | Priority |
 |-------|----------|---------|----------|
-| **Built-in** | Bundled with qwen-local | N/A | Lowest |
-| **User** | `~/.qwen-local/skills/` | No — your machine only | Medium |
-| **Project** | `.qwen-local/skills/` in the project root | Yes — commit to git! | Highest |
+| **Built-in** | Bundled with Mantis | N/A | Lowest |
+| **User** | `~/.mantis/skills/` | No — your machine only | Medium |
+| **Project** | `.mantis/skills/` in the project root | Yes — commit to git! | Highest |
 
 **Priority matters:** If a project has a skill named `commit` and there's also a built-in `commit`, the project version wins. This lets teams customize behavior per-project.
 
@@ -193,7 +193,7 @@ Available in every project you work on. Good for personal preferences.
   Save as (u)ser skill or (p)roject skill? (u/p): u
 ```
 
-Saved to `~/.qwen-local/skills/skillname.json`.
+Saved to `~/.mantis/skills/skillname.json`.
 
 ### Project skills
 
@@ -205,9 +205,9 @@ Live in the project directory and can be committed to git. Good for team-shared 
   Save as (u)ser skill or (p)roject skill? (u/p): p
 ```
 
-Saved to `.qwen-local/skills/skillname.json` in the current project.
+Saved to `.mantis/skills/skillname.json` in the current project.
 
-Team members who use qwen-local will automatically get the project's skills when they work in that repo.
+Team members who use Mantis will automatically get the project's skills when they work in that repo.
 
 ---
 
@@ -263,7 +263,7 @@ Team members who use qwen-local will automatically get the project's skills when
   }
 ```
 
-Copy the JSON, send it to someone, and they save it as `~/.qwen-local/skills/deploy.json`.
+Copy the JSON, send it to someone, and they save it as `~/.mantis/skills/deploy.json`.
 
 ---
 

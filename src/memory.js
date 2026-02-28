@@ -2,8 +2,8 @@
  * Persistent memory system.
  *
  * Two layers:
- *  - Global memory:  ~/.qwen-local/memory/MEMORY.md   (available in all projects)
- *  - Project memory: .qwen-local/MEMORY.md             (per-project, committable to git)
+ *  - Global memory:  ~/.mantis/memory/MEMORY.md   (available in all projects)
+ *  - Project memory: .mantis/MEMORY.md             (per-project, committable to git)
  *
  * Memory is loaded into the system prompt on every session so the model
  * always has context from previous interactions. The model writes to memory
@@ -20,9 +20,9 @@ import path from 'path';
 import os from 'os';
 import { getWorkingDirectory } from './tools.js';
 
-const GLOBAL_MEMORY_DIR = path.join(os.homedir(), '.qwen-local', 'memory');
+const GLOBAL_MEMORY_DIR = path.join(os.homedir(), '.mantis', 'memory');
 const GLOBAL_MEMORY_FILE = path.join(GLOBAL_MEMORY_DIR, 'MEMORY.md');
-const PROJECT_MEMORY_DIRNAME = '.qwen-local';
+const PROJECT_MEMORY_DIRNAME = '.mantis';
 const PROJECT_MEMORY_FILENAME = 'MEMORY.md';
 
 // ─── Read ────────────────────────────────────────────────────────────
@@ -68,12 +68,12 @@ export function buildMemoryBlock() {
   const parts = ['\n\n## Persistent Memory (from previous sessions)'];
 
   if (project) {
-    parts.push('### Project Memory (.qwen-local/MEMORY.md)');
+    parts.push('### Project Memory (.mantis/MEMORY.md)');
     parts.push(project.trim());
   }
 
   if (global) {
-    parts.push('### Global Memory (~/.qwen-local/memory/MEMORY.md)');
+    parts.push('### Global Memory (~/.mantis/memory/MEMORY.md)');
     parts.push(global.trim());
   }
 

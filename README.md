@@ -1,10 +1,19 @@
-# qwen-local
+# Mantis
 
-**Your own AI coding assistant, running entirely on your machine. No API keys. No cloud. No limits.**
+```
+     \_/
+    (o.o)    MANTIS
+   _/|\_    Agentic coding assistant
+  / / \ \
+    / \
+   /   \
+```
 
-qwen-local is an agentic coding CLI — like having a senior dev pair-programming with you in your terminal. It reads your files, writes code, runs commands, searches your codebase, and plans out complex tasks. All powered by [Qwen3-Coder](https://ollama.com/library/qwen3-coder) running locally through [Ollama](https://ollama.com).
+![Mantis in action](images/mantis.png)
 
-![qwen-local in action](images/qwen-local-demo.png)
+**Your own AI coding assistant. Local or cloud. No limits.**
+
+Mantis is an agentic coding CLI — like having a senior dev pair-programming with you in your terminal. It reads your files, writes code, runs commands, searches your codebase, and plans out complex tasks. Powered by any OpenAI-compatible LLM — run locally through [Ollama](https://ollama.com) or connect to cloud GPU providers like Together AI, Groq, Fireworks, and more.
 
 ---
 
@@ -14,34 +23,34 @@ qwen-local is an agentic coding CLI — like having a senior dev pair-programmin
 
 **Windows** (PowerShell):
 ```powershell
-powershell -ExecutionPolicy Bypass -File installer\install-windows.ps1
+powershell -ExecutionPolicy Bypass -File scripts/install.ps1
 ```
-Or just double-click `installer\install.bat`.
 
-**Linux** (Debian/Ubuntu):
+**Linux/macOS**:
 ```bash
-chmod +x installer/install-linux.sh && ./installer/install-linux.sh
+chmod +x scripts/install.sh && ./scripts/install.sh
 ```
 
-The installer handles everything — Ollama, Node.js, the model, PATH setup.
+The installer handles everything — Ollama, Node.js, GPU detection, model selection, PATH setup.
 
 ### Manual install
 
 ```bash
-cd qwen-local
+cd mantis
 npm install
 npm link
 
-# Pull the model (pick one)
-ollama pull qwen3-coder-cpu   # CPU — works on any machine
+# Pull a model (pick one based on your GPU)
 ollama pull qwen3-coder       # GPU — needs NVIDIA + CUDA
+ollama pull qwen2.5-coder:14b # 12-16GB VRAM (RTX 5070/4080)
+ollama pull qwen2.5-coder:32b # 24GB VRAM (RTX 4090/5090)
 ```
 
 ### Run it
 
 ```bash
 cd ~/my-project
-qwen-local
+mantis
 ```
 
 ---
@@ -50,11 +59,17 @@ qwen-local
 
 **10 built-in tools** — reads files, writes code, runs commands, searches your codebase, does surgical edits. It reads before it writes and chains tools together to accomplish complex tasks.
 
+**Cloud & local providers** — Run locally with Ollama or connect to Together AI, Fireworks, Groq, OpenRouter, DeepInfra. Switch with `/provider set`.
+
+**Autonomous mode** — `/auto "build a REST API"` and Mantis plans, writes, builds, tests, and delivers with no hand-holding. 100-iteration limit, all tool calls auto-approved.
+
+**GPU-tiered install** — The installer detects your GPU and pulls the right model size automatically. From 7B on CPU to 32B on RTX 4090/5090.
+
 **Plan mode** — Toggle with `/plan` to explore your codebase and design a plan without touching anything. Toggle off to execute.
 
 **Context management** — Long conversations don't crash. Token usage is tracked and older messages are automatically compacted when the context window fills up.
 
-**Persistent memory** — Tell the model to "save state to memory" and it persists notes for future sessions. Project-scoped (`.qwen-local/MEMORY.md`) or global (`~/.qwen-local/memory/MEMORY.md`).
+**Persistent memory** — Tell the model to "save state to memory" and it persists notes for future sessions. Project-scoped (`.mantis/MEMORY.md`) or global (`~/.mantis/memory/MEMORY.md`).
 
 **Skills** — 8 built-in slash commands (`/commit`, `/review`, `/test`, `/explain`, `/fix`, `/refactor`, `/deps`, `/init`) plus create your own with `/skill create`.
 
@@ -77,22 +92,41 @@ qwen-local
 | `/save [name]` | Save conversation |
 | `/load [name]` | List or load saved conversations |
 | `/compact` | Manually compress history |
-| `/model <name>` | Switch Ollama model |
+| `/model <name>` | Switch model |
 | `/config` | Show configuration |
+| `/provider` | Show/switch providers, set API keys |
+| `/auto <task>` | Run a task autonomously |
 | `/memory` | Show saved memory |
 | `/skills` | List all skills |
 | `/<skillname>` | Run a skill (e.g. `/commit`, `/test`) |
 
 ---
 
+## Providers
+
+| Provider | Command | Free Tier |
+|----------|---------|-----------|
+| **Local (Ollama)** | `/provider set local` | Unlimited |
+| **Together AI** | `/provider set together` | Yes (limited) |
+| **Fireworks AI** | `/provider set fireworks` | Yes (limited) |
+| **Groq** | `/provider set groq` | Yes (generous) |
+| **OpenRouter** | `/provider set openrouter` | No |
+| **DeepInfra** | `/provider set deepinfra` | Yes (limited) |
+
+Set API keys with `/provider key <name> <key>`. Test with `/provider test`.
+
+---
+
 ## Configuration
 
-Settings live at `~/.qwen-local/config.json`:
+Settings live at `~/.mantis/config.json`:
 
 ```json
 {
-  "model": "qwen3-coder-cpu",
+  "model": "qwen3-coder",
   "ollamaUrl": "http://localhost:11434",
+  "provider": "local",
+  "providerKeys": {},
   "maxContextTokens": 32768,
   "compactThreshold": 0.75,
   "commandTimeout": 60000,
@@ -105,25 +139,10 @@ Settings live at `~/.qwen-local/config.json`:
 
 ## Requirements
 
-- **Ollama** — [ollama.com](https://ollama.com)
 - **Node.js** v18+
+- **Ollama** — [ollama.com](https://ollama.com) (for local mode)
 - **RAM** — 8GB minimum, 16GB recommended
-- **Disk** — ~5GB for the model
-
----
-
-## Docs
-
-| | |
-|---|---|
-| [Getting Started](docs/getting-started.md) | Installation and first steps |
-| [Tools Reference](docs/tools.md) | All 10 tools explained |
-| [Skills](docs/skills.md) | Built-in skills, creating your own |
-| [Memory](docs/memory.md) | Persistent state across sessions |
-| [Plan Mode](docs/plan-mode.md) | Read-only exploration |
-| [Context Management](docs/context-management.md) | Token tracking and compaction |
-| [Configuration](docs/configuration.md) | All settings |
-| [Architecture](docs/architecture.md) | How the agent loop works |
+- **Disk** — ~5GB for a local model
 
 ---
 

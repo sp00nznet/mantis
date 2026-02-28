@@ -6,13 +6,13 @@
  * typed it. They can include instructions, context, multi-step workflows,
  * and variable substitution.
  *
- * Storage: ~/.qwen-local/skills/
+ * Storage: ~/.mantis/skills/
  * Format:  One JSON file per skill.
  *
- * Built-in skills ship with qwen-local. User skills override built-ins
+ * Built-in skills ship with Mantis. User skills override built-ins
  * if they share the same name.
  *
- * Project skills can also live in .qwen-local/skills/ at the project root
+ * Project skills can also live in .mantis/skills/ at the project root
  * and take highest priority (project > user > built-in).
  */
 
@@ -21,8 +21,8 @@ import path from 'path';
 import os from 'os';
 import { getWorkingDirectory } from './tools.js';
 
-const USER_SKILLS_DIR = path.join(os.homedir(), '.qwen-local', 'skills');
-const PROJECT_SKILLS_DIRNAME = '.qwen-local/skills';
+const USER_SKILLS_DIR = path.join(os.homedir(), '.mantis', 'skills');
+const PROJECT_SKILLS_DIRNAME = '.mantis/skills';
 
 // ─── Built-in skills ────────────────────────────────────────────────
 

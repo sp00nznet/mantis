@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
 #
-# qwen-local installer for Debian/Ubuntu Linux
+# Mantis installer for Debian/Ubuntu Linux
 #
 # Usage:
-#   curl -fsSL <url>/install-linux.sh | bash
-#   # or
 #   chmod +x install-linux.sh && ./install-linux.sh
 #
 # Options:
-#   --path <dir>    Install path (default: ~/qwen-local)
-#   --mode cpu|gpu  Compute mode (default: interactive prompt)
+#   --path <dir>    Install path (default: ~/mantis)
 #   --unattended    Non-interactive mode (use defaults)
 #
 
@@ -34,21 +31,26 @@ info()    { echo -e "  ${GRAY}$1${NC}"; }
 
 # --- Parse arguments ---
 INSTALL_PATH=""
-MODE=""
 UNATTENDED=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --path)    INSTALL_PATH="$2"; shift 2 ;;
-        --mode)    MODE="$2"; shift 2 ;;
         --unattended) UNATTENDED=true; shift ;;
         *)         echo "Unknown option: $1"; exit 1 ;;
     esac
 done
 
 # --- Banner ---
-header "qwen-local Installer"
-info "Agentic coding assistant powered by Qwen3-Coder"
+echo ""
+echo -e "  ${WHITE}     \\_/${NC}"
+echo -e "  ${WHITE}    (o.o)    MANTIS INSTALLER${NC}"
+echo -e "  ${WHITE}   _/|\\_${NC}"
+echo -e "  ${WHITE}  / / \\ \\${NC}"
+echo -e "  ${WHITE}    / \\${NC}"
+echo -e "  ${WHITE}   /   \\${NC}"
+echo ""
+info "Agentic coding assistant — local or cloud LLMs"
 echo ""
 
 # --- Detect sudo ---
@@ -68,7 +70,7 @@ fi
 step 1 "Choose install location"
 
 if [[ -z "$INSTALL_PATH" ]]; then
-    DEFAULT_PATH="$HOME/qwen-local"
+    DEFAULT_PATH="$HOME/mantis"
     info "Default: $DEFAULT_PATH"
     if [[ "$UNATTENDED" == true ]]; then
         INSTALL_PATH="$DEFAULT_PATH"
@@ -81,33 +83,57 @@ fi
 ok "Install path: $INSTALL_PATH"
 
 # =============================================
-# Step 2: Choose CPU or GPU
+# Step 2: Detect GPU and select model
 # =============================================
-step 2 "Choose compute mode"
+step 2 "Detecting GPU"
 
-if [[ -z "$MODE" ]]; then
-    if [[ "$UNATTENDED" == true ]]; then
-        MODE="cpu"
+MODEL_NAME="qwen2.5-coder:7b"  # default
+
+if command -v nvidia-smi &>/dev/null; then
+    GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader,nounits 2>/dev/null | head -1 | xargs)
+    VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | xargs)
+
+    if [[ -n "$VRAM_MB" ]] && [[ "$VRAM_MB" -gt 0 ]] 2>/dev/null; then
+        VRAM_GB=$((VRAM_MB / 1024))
+        ok "GPU: $GPU_NAME (${VRAM_GB}GB VRAM)"
+
+        if [[ "$VRAM_GB" -ge 24 ]]; then
+            MODEL_NAME="qwen2.5-coder:32b"
+            info "Recommended: qwen2.5-coder:32b (Q4_K_M, ~20GB)"
+        elif [[ "$VRAM_GB" -ge 12 ]]; then
+            MODEL_NAME="qwen2.5-coder:14b"
+            info "Recommended: qwen2.5-coder:14b (~9-12GB)"
+        else
+            info "Recommended: qwen2.5-coder:7b (Q4_K_M, ~5GB)"
+        fi
     else
-        echo ""
-        echo -e "  ${WHITE}1) CPU${NC}  — Works on any machine, slower inference"
-        echo -e "  ${WHITE}2) GPU${NC}  — Requires NVIDIA GPU with CUDA, much faster"
-        echo ""
-        read -rp "  Select mode (1 or 2): " mode_choice
-        case "$mode_choice" in
-            2) MODE="gpu" ;;
-            *) MODE="cpu" ;;
-        esac
+        warn "Could not detect VRAM. Using CPU-friendly model."
     fi
-fi
+elif [[ "$(uname)" == "Darwin" ]] && system_profiler SPDisplaysDataType 2>/dev/null | grep -q "Apple"; then
+    TOTAL_RAM_GB=$(sysctl -n hw.memsize 2>/dev/null | awk '{print int($1/1024/1024/1024)}')
+    ok "GPU: Apple Silicon (${TOTAL_RAM_GB}GB unified memory)"
 
-if [[ "$MODE" == "gpu" ]]; then
-    MODEL_NAME="qwen3-coder"
+    if [[ "$TOTAL_RAM_GB" -ge 32 ]]; then
+        MODEL_NAME="qwen2.5-coder:32b"
+    elif [[ "$TOTAL_RAM_GB" -ge 16 ]]; then
+        MODEL_NAME="qwen2.5-coder:14b"
+    fi
+    info "Recommended: $MODEL_NAME"
 else
-    MODEL_NAME="qwen3-coder-cpu"
+    warn "No NVIDIA GPU detected. Using CPU-friendly model."
 fi
 
-ok "Mode: $(echo "$MODE" | tr '[:lower:]' '[:upper:]') — Model: $MODEL_NAME"
+echo ""
+read -rp "  Use $MODEL_NAME? (Y/n, or type a model name): " model_choice
+if [[ -z "$model_choice" ]] || [[ "$model_choice" =~ ^[Yy]$ ]]; then
+    : # keep
+elif [[ "$model_choice" =~ ^[Nn]$ ]]; then
+    read -rp "  Enter model name: " MODEL_NAME
+else
+    MODEL_NAME="$model_choice"
+fi
+
+ok "Model: $MODEL_NAME"
 echo ""
 
 # =============================================
@@ -151,7 +177,6 @@ fi
 if [[ "$NODE_OK" == false ]]; then
     info "Installing Node.js v20 LTS..."
 
-    # Try NodeSource first (works on Debian/Ubuntu)
     if [[ -f /etc/debian_version ]]; then
         info "Detected Debian/Ubuntu — using NodeSource repository"
         if curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO bash - 2>/dev/null; then
@@ -163,7 +188,6 @@ if [[ "$NODE_OK" == false ]]; then
         fi
     fi
 
-    # Fallback: try nvm
     if [[ "$NODE_OK" == false ]]; then
         info "Trying nvm..."
         export NVM_DIR="$HOME/.nvm"
@@ -183,46 +207,48 @@ if [[ "$NODE_OK" == false ]]; then
 
     if [[ "$NODE_OK" == false ]]; then
         fail "Could not install Node.js automatically."
-        info "Please install Node.js v18+ manually:"
-        info "  https://nodejs.org/en/download"
-        info "Then re-run this installer."
+        info "Please install Node.js v18+ from https://nodejs.org"
         exit 1
     fi
 fi
 
 # =============================================
-# Step 5: Install qwen-local
+# Step 5: Install Mantis
 # =============================================
-step 5 "Installing qwen-local"
+step 5 "Installing Mantis"
 
 mkdir -p "$INSTALL_PATH"
 
-# Copy project files
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
 
 if [[ -f "$SCRIPT_DIR/package.json" ]]; then
-    # Installing from source directory
     cp "$SCRIPT_DIR/package.json" "$INSTALL_PATH/"
     [[ -f "$SCRIPT_DIR/package-lock.json" ]] && cp "$SCRIPT_DIR/package-lock.json" "$INSTALL_PATH/"
     cp -r "$SCRIPT_DIR/bin" "$INSTALL_PATH/"
     cp -r "$SCRIPT_DIR/src" "$INSTALL_PATH/"
-    ok "Copied qwen-local files to $INSTALL_PATH"
+    [[ -d "$SCRIPT_DIR/scripts" ]] && cp -r "$SCRIPT_DIR/scripts" "$INSTALL_PATH/"
+    ok "Copied Mantis files to $INSTALL_PATH"
 else
-    # Installing standalone — files should be bundled with this script
-    fail "Cannot find qwen-local source files."
-    info "Run this installer from the qwen-local/installer/ directory."
+    fail "Cannot find Mantis source files."
+    info "Run this installer from the mantis/installer/ directory."
     exit 1
 fi
 
 # Set the model in config
-CONFIG_DIR="$HOME/.qwen-local"
+CONFIG_DIR="$HOME/.mantis"
 mkdir -p "$CONFIG_DIR" "$CONFIG_DIR/conversations" "$CONFIG_DIR/memory"
 
 cat > "$CONFIG_DIR/config.json" <<EOF
 {
   "model": "$MODEL_NAME",
   "ollamaUrl": "http://localhost:11434",
-  "maxContextTokens": 32768
+  "provider": "local",
+  "providerKeys": {},
+  "maxContextTokens": 32768,
+  "compactThreshold": 0.75,
+  "commandTimeout": 60000,
+  "maxToolResultSize": 8000,
+  "confirmDestructive": true
 }
 EOF
 ok "Configuration saved to $CONFIG_DIR/config.json"
@@ -234,26 +260,25 @@ npm install --production --quiet 2>/dev/null
 ok "Dependencies installed"
 
 # Make entry point executable
-chmod +x "$INSTALL_PATH/bin/qwen-local.js"
+chmod +x "$INSTALL_PATH/bin/mantis.js"
 
 # Create symlink in a PATH directory
 LINK_PATH=""
 if [[ -d "$HOME/.local/bin" ]]; then
-    LINK_PATH="$HOME/.local/bin/qwen-local"
+    LINK_PATH="$HOME/.local/bin/mantis"
 elif [[ -d "$HOME/bin" ]]; then
-    LINK_PATH="$HOME/bin/qwen-local"
+    LINK_PATH="$HOME/bin/mantis"
 else
     mkdir -p "$HOME/.local/bin"
-    LINK_PATH="$HOME/.local/bin/qwen-local"
+    LINK_PATH="$HOME/.local/bin/mantis"
 fi
 
-ln -sf "$INSTALL_PATH/bin/qwen-local.js" "$LINK_PATH"
-ok "Linked: $LINK_PATH → $INSTALL_PATH/bin/qwen-local.js"
+ln -sf "$INSTALL_PATH/bin/mantis.js" "$LINK_PATH"
+ok "Linked: $LINK_PATH → $INSTALL_PATH/bin/mantis.js"
 
-# Ensure ~/.local/bin is in PATH
+# Ensure dir is in PATH
 LINK_DIR="$(dirname "$LINK_PATH")"
 if [[ ":$PATH:" != *":$LINK_DIR:"* ]]; then
-    # Add to shell profile
     SHELL_RC=""
     if [[ -f "$HOME/.bashrc" ]]; then
         SHELL_RC="$HOME/.bashrc"
@@ -265,7 +290,7 @@ if [[ ":$PATH:" != *":$LINK_DIR:"* ]]; then
 
     if [[ -n "$SHELL_RC" ]]; then
         echo "" >> "$SHELL_RC"
-        echo "# qwen-local" >> "$SHELL_RC"
+        echo "# Mantis" >> "$SHELL_RC"
         echo "export PATH=\"\$PATH:$LINK_DIR\"" >> "$SHELL_RC"
         ok "Added $LINK_DIR to PATH in $SHELL_RC"
         info "Run: source $SHELL_RC  (or open a new terminal)"
@@ -276,7 +301,6 @@ if [[ ":$PATH:" != *":$LINK_DIR:"* ]]; then
     export PATH="$PATH:$LINK_DIR"
 fi
 
-# Also try npm link as a backup
 npm link 2>/dev/null || true
 
 # =============================================
@@ -284,14 +308,12 @@ npm link 2>/dev/null || true
 # =============================================
 step 6 "Pulling model: $MODEL_NAME"
 
-# Start Ollama if not running
 OLLAMA_RUNNING=false
 if curl -sf http://localhost:11434/api/version &>/dev/null; then
     OLLAMA_RUNNING=true
     ok "Ollama is running"
 else
     info "Starting Ollama..."
-    # Try systemd first
     if systemctl is-active --quiet ollama 2>/dev/null; then
         OLLAMA_RUNNING=true
     elif $SUDO systemctl start ollama 2>/dev/null; then
@@ -299,7 +321,6 @@ else
         OLLAMA_RUNNING=true
         ok "Ollama started via systemd"
     else
-        # Try direct start
         ollama serve &>/dev/null &
         sleep 3
         if curl -sf http://localhost:11434/api/version &>/dev/null; then
@@ -329,16 +350,21 @@ fi
 # =============================================
 header "Installation Complete!"
 
-info "qwen-local has been installed to: $INSTALL_PATH"
-info "Model: $MODEL_NAME ($(echo "$MODE" | tr '[:lower:]' '[:upper:]') mode)"
+info "Mantis has been installed to: $INSTALL_PATH"
+info "Model: $MODEL_NAME"
 echo ""
 echo -e "  ${WHITE}To get started:${NC}"
 echo -e "  ${GRAY}1. Open a new terminal (or run: source ~/.bashrc)${NC}"
 echo -e "  ${GRAY}2. cd to any project directory${NC}"
-echo -e "  ${GREEN}3. Run: qwen-local${NC}"
+echo -e "  ${GREEN}3. Run: mantis${NC}"
 echo ""
-echo -e "  ${GRAY}If 'qwen-local' is not recognized, run:${NC}"
-echo -e "  ${GRAY}   node $INSTALL_PATH/bin/qwen-local.js${NC}"
+echo -e "  ${GRAY}To use cloud providers:${NC}"
+echo -e "  ${CYAN}/provider list              — see available providers${NC}"
+echo -e "  ${CYAN}/provider set together      — switch to Together AI${NC}"
+echo -e "  ${CYAN}/provider key together KEY  — set API key${NC}"
 echo ""
-info "Type /help inside qwen-local for available commands."
+echo -e "  ${GRAY}If 'mantis' is not recognized, run:${NC}"
+echo -e "  ${GRAY}   node $INSTALL_PATH/bin/mantis.js${NC}"
+echo ""
+info "Type /help inside Mantis for available commands."
 echo ""

@@ -1,7 +1,7 @@
 import { toolDefinitions } from './tool-definitions.js';
 import { buildSystemPrompt } from './prompt.js';
 import { executeTool, getWorkingDirectory, getPlanMode } from './tools.js';
-import { getConfig } from './config.js';
+import { getConfig, PROVIDERS } from './config.js';
 import { shouldCompact, compactMessages, countContextTokens, getContextStats } from './context.js';
 
 export function createAgent() {
@@ -28,7 +28,7 @@ export function createAgent() {
     }
   }
 
-  async function chat(userMessage, { onText, onToolCall, onToolResult, onError, onCompact, onThinking, onToken, signal }) {
+  async function chat(userMessage, { onText, onToolCall, onToolResult, onError, onCompact, onThinking, onToken, onConfirmToolCall, signal, maxLoops: loopLimit }) {
     initSystem();
     _cancelled = false;
     messages.push({ role: 'user', content: userMessage });
@@ -41,21 +41,34 @@ export function createAgent() {
     }
 
     const config = getConfig();
-    const ollamaUrl = `${config.ollamaUrl}/v1/chat/completions`;
+
+    // Build URL and headers based on active provider
+    const provider = PROVIDERS[config.provider] || PROVIDERS.local;
+    let url;
+    let headers = { 'Content-Type': 'application/json' };
+
+    if (config.provider === 'local') {
+      url = `${config.ollamaUrl}/v1/chat/completions`;
+    } else {
+      url = `${provider.baseUrl}/chat/completions`;
+      const apiKey = config.providerKeys?.[config.provider];
+      if (apiKey) {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+      }
+    }
+
     const model = config.model;
 
     let loopCount = 0;
-    const maxLoops = 25;
+    const maxLoops = loopLimit || 25;
 
     while (loopCount < maxLoops && !_cancelled) {
       loopCount++;
-      const assistantMessage = await callOllama(ollamaUrl, model, messages, { onText, onError, onThinking, onToken, signal }, () => _cancelled);
+      const assistantMessage = await callLLM(url, model, messages, headers, { onText, onError, onThinking, onToken, signal }, () => _cancelled);
       if (!assistantMessage || _cancelled) return;
 
       // Fallback: if the model wrote tool calls as JSON text instead of using
       // structured tool_calls, parse them from the text and execute anyway.
-      // This makes qwen-local work with models that don't reliably use the
-      // OpenAI tool calling API format.
       if ((!assistantMessage.tool_calls || assistantMessage.tool_calls.length === 0) && assistantMessage.content) {
         const parsed = parseTextToolCalls(assistantMessage.content);
         if (parsed.length > 0) {
@@ -80,6 +93,22 @@ export function createAgent() {
         }
 
         totalToolCalls++;
+
+        // Confirm tool call with user if callback provided
+        if (onConfirmToolCall) {
+          const approved = await onConfirmToolCall(fnName, args);
+          if (_cancelled) return;
+          if (!approved) {
+            onToolResult(fnName, '[Rejected by user]');
+            messages.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: 'User rejected this tool call. Ask what they want instead, or try a different approach.'
+            });
+            continue;
+          }
+        }
+
         onToolCall(fnName, args);
         const result = await executeTool(fnName, args);
         if (_cancelled) return;
@@ -136,7 +165,7 @@ export function createAgent() {
   return { chat, clearHistory, refreshSystemPrompt, getMessages, setMessages, getStats, cancel };
 }
 
-async function callOllama(url, model, messages, { onText, onError, onThinking, onToken, signal }, isCancelled) {
+async function callLLM(url, model, messages, headers, { onText, onError, onThinking, onToken, signal }, isCancelled) {
   const body = {
     model,
     messages,
@@ -147,26 +176,48 @@ async function callOllama(url, model, messages, { onText, onError, onThinking, o
   if (onThinking) onThinking(true);
 
   let response;
-  try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal,
-    });
-  } catch (err) {
-    if (onThinking) onThinking(false);
-    if (err.name === 'AbortError') return null; // Clean abort via Ctrl+C
-    onError(`Failed to connect to Ollama at ${url}. Is Ollama running?\n${err.message}`);
-    return null;
-  }
+  const maxRetries = 3;
 
-  if (!response.ok) {
-    if (onThinking) onThinking(false);
-    let text = '';
-    try { text = await response.text(); } catch {}
-    onError(`Ollama API error (${response.status}): ${text}`);
-    return null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (isCancelled()) { if (onThinking) onThinking(false); return null; }
+
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal,
+      });
+    } catch (err) {
+      if (onThinking) onThinking(false);
+      if (err.name === 'AbortError') return null;
+      onError(`Failed to connect to LLM at ${url}. Is the provider running?\n${err.message}`);
+      return null;
+    }
+
+    // Retry on rate limit (429) — parse wait time from response body
+    if (response.status === 429 && attempt < maxRetries) {
+      let waitSec = 3;
+      try {
+        const errBody = await response.text();
+        const match = errBody.match(/try again in ([\d.]+)s/i);
+        if (match) waitSec = Math.ceil(parseFloat(match[1]));
+      } catch {}
+      waitSec = Math.min(waitSec, 30); // cap at 30s
+      if (onError) onError(`Rate limited. Retrying in ${waitSec}s... (attempt ${attempt + 1}/${maxRetries})`);
+      await new Promise(r => setTimeout(r, waitSec * 1000));
+      continue;
+    }
+
+    if (!response.ok) {
+      if (onThinking) onThinking(false);
+      let text = '';
+      try { text = await response.text(); } catch {}
+      onError(`LLM API error (${response.status}): ${text}`);
+      return null;
+    }
+
+    break; // success
   }
 
   const reader = response.body.getReader();
@@ -177,9 +228,6 @@ async function callOllama(url, model, messages, { onText, onError, onThinking, o
   let firstToken = true;
 
   while (true) {
-    // Check cancelled before each read — just return, don't cancel the reader.
-    // reader.cancel() causes unhandled promise rejections on Windows that crash Node.
-    // The stream will drain naturally when Ollama finishes generating.
     if (isCancelled()) {
       if (onThinking) onThinking(false);
       return null;
@@ -189,7 +237,6 @@ async function callOllama(url, model, messages, { onText, onError, onThinking, o
     try {
       readResult = await reader.read();
     } catch {
-      // Stream error (connection closed, etc.) — just bail
       if (onThinking) onThinking(false);
       return null;
     }
@@ -273,16 +320,12 @@ async function callOllama(url, model, messages, { onText, onError, onThinking, o
 }
 
 // Parse tool calls from the model's text output.
-// Some models (especially smaller ones) output tool calls as JSON code blocks
-// in their text instead of using the structured tool_calls API format.
-// This extracts those and converts them to proper tool call objects.
 const _toolNames = new Set(toolDefinitions.map(t => t.function.name));
 
 function parseTextToolCalls(text) {
   const calls = [];
 
   // Strategy 1: Extract content between ```json ... ``` code fences
-  // Capture everything between fences, then try to parse as JSON.
   const codeBlockRegex = /```(?:json)?\s*\n([\s\S]*?)\n\s*```/g;
   let match;
   while ((match = codeBlockRegex.exec(text)) !== null) {
@@ -302,13 +345,12 @@ function parseTextToolCalls(text) {
     } catch {}
   }
 
-  // Strategy 2: Find bare JSON objects with brace counting (handles nested braces)
+  // Strategy 2: Find bare JSON objects with brace counting
   if (calls.length === 0) {
     const namePattern = /\{\s*"name"\s*:\s*"(\w+)"/g;
     while ((match = namePattern.exec(text)) !== null) {
       const name = match[1];
       if (!_toolNames.has(name)) continue;
-      // Found a tool name — now extract the full JSON object using brace counting
       const startIdx = match.index;
       let depth = 0;
       let endIdx = -1;

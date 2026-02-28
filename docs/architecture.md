@@ -1,6 +1,6 @@
 # Architecture
 
-qwen-local is intentionally simple — about 800 lines of JavaScript, no frameworks, easy to understand and hack on. Here's how it all fits together.
+Mantis is intentionally simple — about 800 lines of JavaScript, no frameworks, easy to understand and hack on. Here's how it all fits together.
 
 ---
 
@@ -42,8 +42,8 @@ qwen-local is intentionally simple — about 800 lines of JavaScript, no framewo
 │  ┌──────────────────────────────────────────────────┐ │
 │  │                 skills.js                        │ │
 │  │  - Built-in skills (commit, test, review, ...)  │ │
-│  │  - User skills (~/.qwen-local/skills/)          │ │
-│  │  - Project skills (.qwen-local/skills/)         │ │
+│  │  - User skills (~/.mantis/skills/)          │ │
+│  │  - Project skills (.mantis/skills/)         │ │
 │  │  - Template expansion ({{args}}, conditionals)  │ │
 │  └──────────────────────────────────────────────────┘ │
 │                                                       │
@@ -69,7 +69,7 @@ qwen-local is intentionally simple — about 800 lines of JavaScript, no framewo
 
 ## File-by-File
 
-### `bin/qwen-local.js`
+### `bin/mantis.js`
 **3 lines.** Just the entry point with a shebang for Unix compatibility.
 
 ### `src/cli.js` — The Interface
@@ -145,8 +145,8 @@ Saves and loads conversation histories to JSON files on disk.
 ### `src/skills.js` — The Playbook
 The skill system. Three layers of skills with priority resolution:
 - **Built-in** — 8 skills hardcoded in the module (commit, review, test, etc.)
-- **User** — JSON files in `~/.qwen-local/skills/`, available globally
-- **Project** — JSON files in `.qwen-local/skills/` at the project root, highest priority
+- **User** — JSON files in `~/.mantis/skills/`, available globally
+- **Project** — JSON files in `.mantis/skills/` at the project root, highest priority
 
 Key functions:
 - `getAllSkills()` — merges all three sources, later overrides earlier by name
@@ -157,7 +157,7 @@ Key functions:
 The CLI calls `matchSkillCommand()` in its default case — so any `/unknown` command is checked against skills before showing an error.
 
 ### `src/config.js` — The Settings
-Manages `~/.qwen-local/config.json` with defaults, load, and save.
+Manages `~/.mantis/config.json` with defaults, load, and save.
 
 ### `src/utils.js` — The Paintbrush
 Chalk color definitions, tool call formatting, text truncation, duration formatting, context bar rendering.
@@ -166,7 +166,7 @@ Chalk color definitions, tool call formatting, text truncation, duration formatt
 
 ## The Ollama API
 
-qwen-local uses Ollama's OpenAI-compatible endpoint:
+Mantis uses Ollama's OpenAI-compatible endpoint:
 
 ```
 POST http://localhost:11434/v1/chat/completions
@@ -247,7 +247,7 @@ That's it. The model will start using your tool in the next session.
 
 Even simpler — no code changes needed. Two options:
 
-### Option A: Interactive (from inside qwen-local)
+### Option A: Interactive (from inside Mantis)
 ```
 /skill create
 ```
@@ -255,7 +255,7 @@ Follow the prompts. Done.
 
 ### Option B: Drop a JSON file
 
-Create `~/.qwen-local/skills/my-skill.json`:
+Create `~/.mantis/skills/my-skill.json`:
 
 ```json
 {

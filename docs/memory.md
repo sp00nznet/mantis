@@ -1,6 +1,6 @@
 # Memory & State Persistence
 
-qwen-local can remember things across sessions. When you tell it to "save your state to memory," it writes persistent notes that get loaded automatically the next time you start a session.
+Mantis can remember things across sessions. When you tell it to "save your state to memory," it writes persistent notes that get loaded automatically the next time you start a session.
 
 This is the key difference between memory and conversation save/load:
 - **Conversations** (`/save`, `/load`) store the raw message history — exact replay of what happened.
@@ -49,8 +49,8 @@ The model automatically sees its memory in the system prompt — no need to expl
 
 | Scope | File | Shared? | Use for |
 |-------|------|---------|---------|
-| **Project** | `.qwen-local/MEMORY.md` in the project root | Yes (commit to git) | Project-specific: task state, architecture decisions, file notes |
-| **Global** | `~/.qwen-local/memory/MEMORY.md` | No (your machine only) | Universal: coding preferences, style choices, workflow habits |
+| **Project** | `.mantis/MEMORY.md` in the project root | Yes (commit to git) | Project-specific: task state, architecture decisions, file notes |
+| **Global** | `~/.mantis/memory/MEMORY.md` | No (your machine only) | Universal: coding preferences, style choices, workflow habits |
 
 ### The Memory Lifecycle
 
@@ -143,9 +143,9 @@ Status: In progress — server-side done, client pending.
 
   Memory Status
   Project: 847 chars
-           D:\myproject\.qwen-local\MEMORY.md
+           D:\myproject\.mantis\MEMORY.md
   Global:  234 chars
-           C:\Users\you\.qwen-local\memory\MEMORY.md
+           C:\Users\you\.mantis\memory\MEMORY.md
 ```
 
 The status also shows in `/status`:
@@ -181,7 +181,7 @@ The model is instructed to:
 
 ## Project Memory & Git
 
-Project memory lives in `.qwen-local/MEMORY.md` at the project root. This means you can:
+Project memory lives in `.mantis/MEMORY.md` at the project root. This means you can:
 
 - **Commit it to git** so team members benefit from the model's understanding
 - **Include it in .gitignore** if you want personal-only memory
@@ -207,7 +207,7 @@ A team might commit memory like:
 - Error handling: throw AppError, caught by global handler
 ```
 
-Every team member who uses qwen-local in this repo automatically gets this context.
+Every team member who uses Mantis in this repo automatically gets this context.
 
 ---
 

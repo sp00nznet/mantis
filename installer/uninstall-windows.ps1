@@ -1,28 +1,28 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Uninstaller for qwen-local
+    Uninstaller for Mantis
 .DESCRIPTION
-    Removes qwen-local CLI. Optionally removes Ollama and models.
+    Removes Mantis CLI. Optionally removes Ollama and models.
 #>
 
 $ErrorActionPreference = "Stop"
 
 Write-Host ""
-Write-Host "  qwen-local Uninstaller" -ForegroundColor Magenta
+Write-Host "  Mantis Uninstaller" -ForegroundColor Magenta
 Write-Host ""
 
 # Unlink global command
 Write-Host "  Removing global link..." -ForegroundColor Cyan
 try {
-    & npm unlink -g qwen-local 2>$null
+    & npm unlink -g mantis-code 2>$null
     Write-Host "  [OK] Global link removed" -ForegroundColor Green
 } catch {
     Write-Host "  [--] No global link found" -ForegroundColor Gray
 }
 
-# Remove config directory
-$configDir = Join-Path $env:USERPROFILE ".qwen-local"
+# Remove new config directory
+$configDir = Join-Path $env:USERPROFILE ".mantis"
 if (Test-Path $configDir) {
     $removeConfig = Read-Host "  Remove config and saved conversations at $configDir? (y/N)"
     if ($removeConfig -eq "y") {
@@ -33,8 +33,18 @@ if (Test-Path $configDir) {
     }
 }
 
+# Also check for old config
+$oldConfigDir = Join-Path $env:USERPROFILE ".qwen-local"
+if (Test-Path $oldConfigDir) {
+    $removeOld = Read-Host "  Remove old qwen-local config at $oldConfigDir? (y/N)"
+    if ($removeOld -eq "y") {
+        Remove-Item $oldConfigDir -Recurse -Force
+        Write-Host "  [OK] Old config removed" -ForegroundColor Green
+    }
+}
+
 # Remove install directory
-$defaultPath = Join-Path $env:USERPROFILE "qwen-local"
+$defaultPath = Join-Path $env:USERPROFILE "mantis"
 $removePath = Read-Host "  Remove install directory? Enter path or press Enter for $defaultPath (or 'n' to skip)"
 if ($removePath -ne "n" -and $removePath -ne "N") {
     $targetPath = if ([string]::IsNullOrWhiteSpace($removePath)) { $defaultPath } else { $removePath }
@@ -56,7 +66,7 @@ if ($userPath -like "*$binPath*") {
 }
 
 Write-Host ""
-Write-Host "  qwen-local has been uninstalled." -ForegroundColor Green
+Write-Host "  Mantis has been uninstalled." -ForegroundColor Green
 Write-Host "  Note: Ollama and models were NOT removed." -ForegroundColor Gray
 Write-Host "  To remove Ollama: uninstall from Add/Remove Programs" -ForegroundColor Gray
 Write-Host "  To remove models: ollama rm <model-name>" -ForegroundColor Gray

@@ -1,7 +1,7 @@
 @echo off
-title qwen-local Installer
+title Mantis Installer
 echo.
-echo   Starting qwen-local installer...
+echo   Starting Mantis installer...
 echo.
 powershell -ExecutionPolicy Bypass -File "%~dp0install-windows.ps1"
 echo.

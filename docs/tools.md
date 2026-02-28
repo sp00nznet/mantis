@@ -1,12 +1,12 @@
 # Tools Reference
 
-qwen-local gives the AI model 10 tools to interact with your system. The model decides which tools to use and when — you just describe what you want done.
+Mantis gives the AI model 10 tools to interact with your system. The model decides which tools to use and when — you just describe what you want done.
 
 ---
 
 ## How Tools Work
 
-When you ask the model to do something, it doesn't just generate text. It can make **tool calls** — structured requests to read files, run commands, etc. qwen-local executes those calls and feeds the results back to the model, which then decides what to do next.
+When you ask the model to do something, it doesn't just generate text. It can make **tool calls** — structured requests to read files, run commands, etc. Mantis executes those calls and feeds the results back to the model, which then decides what to do next.
 
 A single prompt might trigger a chain of tools:
 
@@ -203,8 +203,8 @@ Saves persistent notes to memory that survive across sessions. The model uses th
 | `mode` | string | no | `"replace"` (default) overwrites, `"append"` adds to the end |
 
 **Behavior:**
-- Project memory saves to `.qwen-local/MEMORY.md` in the project root (committable to git)
-- Global memory saves to `~/.qwen-local/memory/MEMORY.md` (personal, all projects)
+- Project memory saves to `.mantis/MEMORY.md` in the project root (committable to git)
+- Global memory saves to `~/.mantis/memory/MEMORY.md` (personal, all projects)
 - Append mode adds a timestamped separator before the new content
 - The model typically reads existing memory first, then replaces with an updated version
 

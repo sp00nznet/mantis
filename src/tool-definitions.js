@@ -173,7 +173,7 @@ export const toolDefinitions = [
           scope: {
             type: "string",
             enum: ["project", "global"],
-            description: "Where to save: 'project' saves to .qwen-local/MEMORY.md (for this project, shareable via git), 'global' saves to ~/.qwen-local/memory/MEMORY.md (available everywhere). Default: project."
+            description: "Where to save: 'project' saves to .mantis/MEMORY.md (for this project, shareable via git), 'global' saves to ~/.mantis/memory/MEMORY.md (available everywhere). Default: project."
           },
           mode: {
             type: "string",

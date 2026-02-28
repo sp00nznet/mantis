@@ -1,12 +1,12 @@
 {
-  "name": "qwen-local",
-  "version": "1.0.0",
-  "description": "A Claude Code-like agentic CLI powered by Qwen3-Coder via Ollama",
+  "name": "mantis-code",
+  "version": "2.0.0",
+  "description": "Agentic coding CLI — local or cloud LLMs, autonomous mode, GPU-tiered installs",
   "bin": {
-    "qwen-local": "./bin/qwen-local.js"
+    "mantis": "./bin/mantis.js"
   },
   "scripts": {
-    "start": "node bin/qwen-local.js"
+    "start": "node bin/mantis.js"
   },
   "dependencies": {
     "chalk": "^5.3.0",
