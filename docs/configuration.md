@@ -29,7 +29,9 @@ Here's the full config with defaults:
   "compactThreshold": 0.75,
   "commandTimeout": 60000,
   "maxToolResultSize": 8000,
-  "confirmDestructive": true
+  "confirmDestructive": true,
+  "provider": "local",
+  "providerKeys": {}
 }
 ```
 
@@ -44,6 +46,8 @@ Here's the full config with defaults:
 | `commandTimeout` | integer | `60000` | Max time (in ms) for `run_command` before killing the process. Default is 60 seconds. |
 | `maxToolResultSize` | integer | `8000` | Max characters returned from any tool. Longer results are truncated. |
 | `confirmDestructive` | boolean | `true` | Reserved for future use — will prompt before destructive operations. |
+| `provider` | string | `local` | Active provider key. See [Providers](#providers) below. |
+| `providerKeys` | object | `{}` | API keys for cloud providers, keyed by provider name. |
 
 ---
 
@@ -70,6 +74,79 @@ Changes take effect on next Mantis startup.
 ### Option 3: Installer sets initial config
 
 The installer creates `config.json` with the model you chose (CPU/GPU) and sensible defaults.
+
+---
+
+## Providers
+
+Mantis supports 17 providers out of the box. All use the OpenAI-compatible chat completions API, so switching between them is seamless.
+
+### Switching providers
+
+```
+> /provider list               # see all 17 providers
+> /provider set gemini         # switch to Google Gemini
+> /provider key gemini KEY     # set your API key
+> /provider test               # verify it works
+> /provider show               # show current provider + model
+```
+
+### Available providers
+
+| Key | Provider | Base URL | Requires Key | Default Model |
+|-----|----------|----------|:------------:|---------------|
+| `local` | Ollama | `http://localhost:11434/v1` | No | `qwen3-coder` |
+| `together` | Together AI | `https://api.together.xyz/v1` | Yes | `Qwen/Qwen2.5-Coder-32B-Instruct` |
+| `fireworks` | Fireworks AI | `https://api.fireworks.ai/inference/v1` | Yes | `qwen2p5-coder-32b-instruct` |
+| `groq` | Groq | `https://api.groq.com/openai/v1` | Yes | `qwen/qwen3-32b` |
+| `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` | Yes | `qwen/qwen-2.5-coder-32b-instruct` |
+| `deepinfra` | DeepInfra | `https://api.deepinfra.com/v1/openai` | Yes | `Qwen/Qwen2.5-Coder-32B-Instruct` |
+| `chutes` | Chutes AI | `https://llm.chutes.ai/v1` | Yes | `Qwen/Qwen2.5-Coder-32B-Instruct` |
+| `cerebras` | Cerebras | `https://api.cerebras.ai/v1` | Yes | `qwen-3-coder-480b` |
+| `novita` | Novita AI | `https://api.novita.ai/v3/openai` | Yes | `qwen/qwen3-coder-480b-a35b-instruct` |
+| `mistral` | Mistral AI | `https://api.mistral.ai/v1` | Yes | `codestral-latest` |
+| `openai` | OpenAI | `https://api.openai.com/v1` | Yes | `gpt-4o` |
+| `anthropic` | Anthropic (Claude) | `https://api.anthropic.com/v1/` | Yes | `claude-sonnet-4-6` |
+| `gemini` | Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai/` | Yes | `gemini-2.5-flash` |
+| `xai` | xAI (Grok) | `https://api.x.ai/v1` | Yes | `grok-3` |
+| `perplexity` | Perplexity | `https://api.perplexity.ai` | Yes | `sonar-pro` |
+| `sambanova` | SambaNova | `https://api.sambanova.ai/v1` | Yes | `Qwen3-32B` |
+| `cohere` | Cohere | `https://api.cohere.ai/compatibility/v1` | Yes | `command-a-03-2025` |
+
+### API keys in config
+
+Keys are stored in `providerKeys` in your config file:
+
+```json
+{
+  "provider": "gemini",
+  "providerKeys": {
+    "gemini": "AIza...",
+    "groq": "gsk_...",
+    "openai": "sk-..."
+  }
+}
+```
+
+You can set keys via the CLI (`/provider key <name> <key>`) or by editing the config file directly.
+
+### Using a custom model
+
+Each provider has a default model, but you can override it:
+
+```
+> /provider set openai
+> /model gpt-4o-mini           # use a cheaper OpenAI model
+> /provider set groq
+> /model llama-3.3-70b-versatile  # use Llama on Groq
+```
+
+### Notes on specific providers
+
+- **Anthropic (Claude)** — Uses Anthropic's OpenAI compatibility layer. Works for chat + tool calling, but some Claude-specific features (prompt caching, extended thinking) aren't available through this endpoint.
+- **Google Gemini** — Has the most generous free tier: 1 million tokens/day with no credit card required. Get your key at [aistudio.google.com](https://aistudio.google.com).
+- **Perplexity** — Unique because it's search-augmented. Responses include live web knowledge, useful for questions about recent APIs or libraries.
+- **OpenRouter** — An aggregator that routes to many providers. Useful if you want access to many models through a single API key.
 
 ---
 

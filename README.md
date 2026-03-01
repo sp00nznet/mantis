@@ -13,7 +13,7 @@
 
 **Your own AI coding assistant. Local or cloud. No limits.**
 
-Mantis is an agentic coding CLI — like having a senior dev pair-programming with you in your terminal. It reads your files, writes code, runs commands, searches your codebase, and plans out complex tasks. Powered by any OpenAI-compatible LLM — run locally through [Ollama](https://ollama.com) or connect to cloud GPU providers like Together AI, Groq, Fireworks, and more.
+Mantis is an agentic coding CLI — like having a senior dev pair-programming with you in your terminal. It reads your files, writes code, runs commands, searches your codebase, and plans out complex tasks. Powered by any OpenAI-compatible LLM — run locally through [Ollama](https://ollama.com) or connect to 17 cloud providers including OpenAI, Claude, Gemini, Groq, Cerebras, and more.
 
 ---
 
@@ -59,7 +59,7 @@ mantis
 
 **10 built-in tools** — reads files, writes code, runs commands, searches your codebase, does surgical edits. It reads before it writes and chains tools together to accomplish complex tasks.
 
-**Cloud & local providers** — Run locally with Ollama or connect to Together AI, Fireworks, Groq, OpenRouter, DeepInfra. Switch with `/provider set`.
+**17 providers** — Run locally with Ollama or connect to OpenAI, Claude, Gemini, Groq, Cerebras, Mistral, and 10 more cloud providers. Switch with `/provider set`.
 
 **Autonomous mode** — `/auto "build a REST API"` and Mantis plans, writes, builds, tests, and delivers with no hand-holding. 100-iteration limit, all tool calls auto-approved.
 
@@ -104,16 +104,60 @@ mantis
 
 ## Providers
 
-| Provider | Command | Free Tier |
-|----------|---------|-----------|
-| **Local (Ollama)** | `/provider set local` | Unlimited |
-| **Together AI** | `/provider set together` | Yes (limited) |
-| **Fireworks AI** | `/provider set fireworks` | Yes (limited) |
-| **Groq** | `/provider set groq` | Yes (generous) |
-| **OpenRouter** | `/provider set openrouter` | No |
-| **DeepInfra** | `/provider set deepinfra` | Yes (limited) |
+Mantis works with any OpenAI-compatible API. 17 providers are built in — switch with `/provider set <name>`.
 
-Set API keys with `/provider key <name> <key>`. Test with `/provider test`.
+### Local
+
+| Provider | Key | Free Tier | Default Model |
+|----------|-----|-----------|---------------|
+| **Ollama** | `local` | Unlimited (your hardware) | `qwen3-coder` |
+
+### Cloud — Open-Source Model Hosts
+
+| Provider | Key | Free Tier | Default Model | Highlight |
+|----------|-----|-----------|---------------|-----------|
+| **Together AI** | `together` | Yes (limited) | `Qwen/Qwen2.5-Coder-32B-Instruct` | 100+ models |
+| **Fireworks AI** | `fireworks` | Yes (limited) | `qwen2p5-coder-32b-instruct` | Fast inference |
+| **Groq** | `groq` | Yes (generous) | `qwen/qwen3-32b` | Ultra-fast LPU hardware |
+| **DeepInfra** | `deepinfra` | Yes (limited) | `Qwen/Qwen2.5-Coder-32B-Instruct` | Affordable |
+| **Cerebras** | `cerebras` | Yes | `qwen-3-coder-480b` | 2000+ tok/s, fastest available |
+| **SambaNova** | `sambanova` | Yes | `Qwen3-32B` | Fast RDU inference |
+| **Chutes AI** | `chutes` | No ($3/mo+) | `Qwen/Qwen2.5-Coder-32B-Instruct` | Decentralized serverless |
+| **Novita AI** | `novita` | Yes | `qwen/qwen3-coder-480b-a35b-instruct` | 200+ models, cheap |
+
+### Cloud — Frontier / Proprietary Models
+
+| Provider | Key | Free Tier | Default Model | Highlight |
+|----------|-----|-----------|---------------|-----------|
+| **OpenAI** | `openai` | No (pay-per-token) | `gpt-4o` | GPT-4o, o3 — the original |
+| **Anthropic (Claude)** | `anthropic` | No (pay-per-token) | `claude-sonnet-4-6` | Via OpenAI compat layer |
+| **Google Gemini** | `gemini` | Yes (1M tokens/day!) | `gemini-2.5-flash` | Best free tier anywhere |
+| **xAI (Grok)** | `xai` | $25 free credits | `grok-3` | Grok-3 |
+| **Mistral AI** | `mistral` | Yes (1B tokens/mo) | `codestral-latest` | Codestral for coding |
+
+### Cloud — Aggregators & Specialty
+
+| Provider | Key | Free Tier | Default Model | Highlight |
+|----------|-----|-----------|---------------|-----------|
+| **OpenRouter** | `openrouter` | Some free models | `qwen/qwen-2.5-coder-32b-instruct` | Routes to dozens of providers |
+| **Perplexity** | `perplexity` | No | `sonar-pro` | Search-augmented, live web |
+| **Cohere** | `cohere` | Trial key | `command-a-03-2025` | Enterprise-grade |
+
+### Setup
+
+```bash
+# Set a provider
+/provider set gemini
+
+# Add your API key
+/provider key gemini YOUR_API_KEY
+
+# Test the connection
+/provider test
+
+# List all providers
+/provider list
+```
 
 ---
 

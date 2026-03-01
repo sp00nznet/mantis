@@ -53,16 +53,18 @@ Mantis is intentionally simple — about 800 lines of JavaScript, no frameworks,
 │  └─────────────────────────────────────────────────┘  │
 └───────────────────────────┬─────────────────────────┘
                             │ HTTP (SSE streaming)
+                            │ OpenAI-compatible API
                             ▼
-              ┌─────────────────────────┐
-              │         Ollama          │
-              │    localhost:11434       │
-              │                         │
-              │  ┌───────────────────┐  │
-              │  │  qwen3-coder-cpu  │  │
-              │  │  (or any model)   │  │
-              │  └───────────────────┘  │
-              └─────────────────────────┘
+          ┌──────────────────────────────────┐
+          │      Any OpenAI-Compatible       │
+          │           Endpoint               │
+          │                                  │
+          │  Local:    Ollama (localhost)     │
+          │  Cloud:    OpenAI, Claude,        │
+          │            Gemini, Groq,          │
+          │            Cerebras, Mistral,     │
+          │            + 10 more providers    │
+          └──────────────────────────────────┘
 ```
 
 ---
@@ -157,23 +159,38 @@ Key functions:
 The CLI calls `matchSkillCommand()` in its default case — so any `/unknown` command is checked against skills before showing an error.
 
 ### `src/config.js` — The Settings
-Manages `~/.mantis/config.json` with defaults, load, and save.
+Manages `~/.mantis/config.json` with defaults, load, and save. Also contains the `PROVIDERS` registry — a constant object mapping 17 provider keys to their base URLs, default models, and auth requirements. Adding a new provider is as simple as adding an entry to this object.
 
 ### `src/utils.js` — The Paintbrush
 Chalk color definitions, tool call formatting, text truncation, duration formatting, context bar rendering.
 
 ---
 
-## The Ollama API
+## The API Layer
 
-Mantis uses Ollama's OpenAI-compatible endpoint:
+Mantis talks to any OpenAI-compatible `POST /v1/chat/completions` endpoint. The provider registry in `config.js` defines 17 providers, each with a base URL, default model, and auth requirements.
+
+### How provider switching works
 
 ```
-POST http://localhost:11434/v1/chat/completions
+config.js: PROVIDERS = {
+  local:    { baseUrl: 'http://localhost:11434/v1', ... },
+  openai:   { baseUrl: 'https://api.openai.com/v1', ... },
+  gemini:   { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/', ... },
+  groq:     { baseUrl: 'https://api.groq.com/openai/v1', ... },
+  cerebras: { baseUrl: 'https://api.cerebras.ai/v1', ... },
+  ...17 total
+}
 ```
 
-Request body:
-```json
+The `callLLM()` function in `agent.js` reads the active provider from config, builds the request URL from the base URL, and adds an `Authorization: Bearer <key>` header for cloud providers. The rest — SSE streaming, tool call parsing, message assembly — is identical regardless of provider.
+
+### Request format
+
+```
+POST {baseUrl}/chat/completions
+Authorization: Bearer {apiKey}    ← only for cloud providers
+
 {
   "model": "qwen3-coder-cpu",
   "messages": [ ... ],
@@ -182,14 +199,16 @@ Request body:
 }
 ```
 
-Response: Server-Sent Events (SSE) stream where each event is a JSON chunk:
+### Response format
+
+Server-Sent Events (SSE) stream where each event is a JSON chunk:
 ```
 data: {"choices":[{"delta":{"content":"Hello"},"index":0}]}
 data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"read","arguments":"{\"pa"}}]},"index":0}]}
 data: [DONE]
 ```
 
-The streaming parser in `agent.js` reassembles these fragments into complete messages.
+The streaming parser in `agent.js` reassembles these fragments into complete messages. This format is the same across all 17 providers — that's the power of the OpenAI-compatible standard.
 
 ---
 

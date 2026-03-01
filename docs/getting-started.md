@@ -99,6 +99,39 @@ mantis
 
 ---
 
+## Cloud Providers (No GPU Required)
+
+Don't have a GPU? Skip Ollama entirely and connect to a cloud provider:
+
+```bash
+# Install Mantis (Node.js only — no Ollama needed)
+cd mantis
+npm install
+npm link
+
+# Launch
+mantis
+
+# Inside Mantis, switch to a cloud provider:
+> /provider set gemini
+> /provider key gemini YOUR_API_KEY
+> /provider test
+```
+
+### Best free options to get started
+
+| Provider | How to get a key | Free tier |
+|----------|-----------------|-----------|
+| **Google Gemini** | [aistudio.google.com](https://aistudio.google.com) | 1M tokens/day |
+| **Groq** | [console.groq.com](https://console.groq.com) | 1,000 req/day on large models |
+| **Cerebras** | [cloud.cerebras.ai](https://cloud.cerebras.ai) | Free tier, fastest inference |
+| **Mistral** | [console.mistral.ai](https://console.mistral.ai) | 1B tokens/month |
+| **xAI (Grok)** | [console.x.ai](https://console.x.ai) | $25 free credits |
+
+See [Configuration — Providers](configuration.md#providers) for all 17 providers.
+
+---
+
 ## Your First Session
 
 Open a terminal, navigate to any project, and start:
