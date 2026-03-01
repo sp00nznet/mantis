@@ -65,7 +65,7 @@ export const PROVIDERS = {
     name: 'Cerebras',
     baseUrl: 'https://api.cerebras.ai/v1',
     requiresKey: true,
-    defaultModel: 'qwen-3-235b-a22b-instruct-2507',
+    defaultModel: 'llama-3.3-70b',
     description: 'Ultra-fast wafer-scale inference — 2000+ tok/s',
   },
   novita: {
