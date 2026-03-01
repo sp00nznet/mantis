@@ -38,6 +38,7 @@ export const PROVIDERS = {
     requiresKey: true,
     defaultModel: 'qwen/qwen3-32b',
     description: 'Ultra-fast inference — generous free tier',
+    rateLimit: { rpm: 30, rpd: 14400 },
   },
   openrouter: {
     name: 'OpenRouter',
@@ -80,6 +81,7 @@ export const PROVIDERS = {
     requiresKey: true,
     defaultModel: 'codestral-latest',
     description: 'Codestral for coding — free tier with 1B tokens/mo',
+    rateLimit: { rpm: 2 },
   },
   openai: {
     name: 'OpenAI',
@@ -100,7 +102,8 @@ export const PROVIDERS = {
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     requiresKey: true,
     defaultModel: 'gemini-2.5-flash',
-    description: 'Gemini 2.5 — incredible free tier (1M tokens/day)',
+    description: 'Gemini 2.5 — free tier (5 RPM, 20 RPD)',
+    rateLimit: { rpm: 5, rpd: 20 },
   },
   xai: {
     name: 'xAI (Grok)',
