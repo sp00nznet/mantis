@@ -176,7 +176,7 @@ async function callLLM(url, model, messages, headers, { onText, onError, onThink
   if (onThinking) onThinking(true);
 
   let response;
-  const maxRetries = 3;
+  const maxRetries = 5;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (isCancelled()) { if (onThinking) onThinking(false); return null; }
@@ -195,16 +195,24 @@ async function callLLM(url, model, messages, headers, { onText, onError, onThink
       return null;
     }
 
-    // Retry on rate limit (429) — parse wait time from response body
+    // Retry on rate limit (429) — parse wait time from response or Retry-After header
     if (response.status === 429 && attempt < maxRetries) {
-      let waitSec = 3;
-      try {
-        const errBody = await response.text();
-        const match = errBody.match(/try again in ([\d.]+)s/i);
-        if (match) waitSec = Math.ceil(parseFloat(match[1]));
-      } catch {}
-      waitSec = Math.min(waitSec, 30); // cap at 30s
-      if (onError) onError(`Rate limited. Retrying in ${waitSec}s... (attempt ${attempt + 1}/${maxRetries})`);
+      let waitSec = 5;
+      // Check Retry-After header first (standard HTTP)
+      const retryAfter = response.headers.get('retry-after');
+      if (retryAfter && /^\d+$/.test(retryAfter.trim())) {
+        waitSec = parseInt(retryAfter.trim(), 10);
+      } else {
+        try {
+          const errBody = await response.text();
+          // Match: "retryDelay": "40s", "retry in 40.2s", "try again in 3s"
+          const match = errBody.match(/(?:retry(?:Delay|[-_ ]?after)?["' :]*(in\s*)?|try again in\s*)([\d.]+)\s*s?/i);
+          if (match) waitSec = Math.ceil(parseFloat(match[2]));
+        } catch {}
+      }
+      waitSec = Math.max(waitSec, 1);  // at least 1s
+      waitSec = Math.min(waitSec, 120); // cap at 2 min
+      if (onError) onError(`Rate limited. Waiting ${waitSec}s... (attempt ${attempt + 1}/${maxRetries})`);
       await new Promise(r => setTimeout(r, waitSec * 1000));
       continue;
     }
