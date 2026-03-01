@@ -53,6 +53,34 @@ export const PROVIDERS = {
     defaultModel: 'Qwen/Qwen2.5-Coder-32B-Instruct',
     description: 'Affordable cloud inference — free tier available',
   },
+  chutes: {
+    name: 'Chutes AI',
+    baseUrl: 'https://llm.chutes.ai/v1',
+    requiresKey: true,
+    defaultModel: 'Qwen/Qwen2.5-Coder-32B-Instruct',
+    description: 'Decentralized serverless inference — open-source models',
+  },
+  cerebras: {
+    name: 'Cerebras',
+    baseUrl: 'https://api.cerebras.ai/v1',
+    requiresKey: true,
+    defaultModel: 'qwen-3-coder-480b',
+    description: 'Ultra-fast wafer-scale inference — 2000+ tok/s',
+  },
+  novita: {
+    name: 'Novita AI',
+    baseUrl: 'https://api.novita.ai/v3/openai',
+    requiresKey: true,
+    defaultModel: 'qwen/qwen3-coder-480b-a35b-instruct',
+    description: '200+ models — cheap serverless inference',
+  },
+  mistral: {
+    name: 'Mistral AI',
+    baseUrl: 'https://api.mistral.ai/v1',
+    requiresKey: true,
+    defaultModel: 'codestral-latest',
+    description: 'Codestral for coding — free tier with 1B tokens/mo',
+  },
 };
 
 const DEFAULTS = {
