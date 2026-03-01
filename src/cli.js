@@ -354,6 +354,11 @@ async function handleUserInput(input, rl, agent, opts = {}) {
   if (thinkingSpinner) { thinkingSpinner.stop(); thinkingSpinner = null; }
   if (spinner) { spinner.stop(); spinner = null; }
 
+  // Restore terminal state after ORA spinners — show cursor
+  // ORA hides cursor during animation; if stopped uncleanly it stays hidden
+  process.stdout.write('\x1B[?25h');
+  process.stderr.write('\x1B[?25h');
+
   _cancelResolve = null;
 
   if (_aborted) {

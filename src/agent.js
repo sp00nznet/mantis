@@ -212,8 +212,23 @@ async function callLLM(url, model, messages, headers, { onText, onError, onThink
       }
       waitSec = Math.max(waitSec, 1);  // at least 1s
       waitSec = Math.min(waitSec, 120); // cap at 2 min
-      if (onError) onError(`Rate limited. Waiting ${waitSec}s... (attempt ${attempt + 1}/${maxRetries})`);
-      await new Promise(r => setTimeout(r, waitSec * 1000));
+      // Countdown timer so user knows how long to wait
+      if (onError) {
+        let remaining = waitSec;
+        onError(`Rate limited. Waiting ${remaining}s... (attempt ${attempt + 1}/${maxRetries})`);
+        const countdownInterval = setInterval(() => {
+          remaining--;
+          if (remaining > 0) {
+            // Overwrite previous line with updated countdown
+            process.stdout.write(`\r  Rate limited. Waiting ${remaining}s... (attempt ${attempt + 1}/${maxRetries})  `);
+          }
+        }, 1000);
+        await new Promise(r => setTimeout(r, waitSec * 1000));
+        clearInterval(countdownInterval);
+        process.stdout.write('\r  Retrying...                                           \n');
+      } else {
+        await new Promise(r => setTimeout(r, waitSec * 1000));
+      }
       continue;
     }
 
