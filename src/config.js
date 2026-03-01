@@ -90,14 +90,14 @@ export const PROVIDERS = {
   },
   anthropic: {
     name: 'Anthropic (Claude)',
-    baseUrl: 'https://api.anthropic.com/v1/',
+    baseUrl: 'https://api.anthropic.com/v1',
     requiresKey: true,
     defaultModel: 'claude-sonnet-4-6',
     description: 'Claude Sonnet/Opus — OpenAI compat layer',
   },
   gemini: {
     name: 'Google Gemini',
-    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     requiresKey: true,
     defaultModel: 'gemini-2.5-flash',
     description: 'Gemini 2.5 — incredible free tier (1M tokens/day)',

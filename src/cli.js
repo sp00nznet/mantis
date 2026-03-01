@@ -615,14 +615,15 @@ async function handleCommand(cmd, rl, agent, ask) {
           console.log(colors.dim(`  Testing connection to ${p.name}...`));
 
           try {
-            const url = config.provider === 'local'
-              ? `${config.ollamaUrl}/v1/models`
-              : `${p.baseUrl}/models`;
+            const base = config.provider === 'local'
+              ? `${config.ollamaUrl}/v1`
+              : p.baseUrl.replace(/\/+$/, '');
             const headers = { 'Content-Type': 'application/json' };
             const apiKey = config.providerKeys?.[config.provider];
             if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
-            const response = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+            // Try /models first
+            let response = await fetch(`${base}/models`, { headers, signal: AbortSignal.timeout(10000) });
             if (response.ok) {
               const data = await response.json();
               const modelCount = data.data?.length || 0;
@@ -630,6 +631,26 @@ async function handleCommand(cmd, rl, agent, ask) {
               if (modelCount > 0 && modelCount <= 20) {
                 const models = data.data.map(m => m.id).slice(0, 10);
                 console.log(colors.dim(`  Models: ${models.join(', ')}${modelCount > 10 ? '...' : ''}`));
+              }
+            } else if (response.status === 404) {
+              // Some providers don't support /models — fall back to a tiny chat completion
+              response = await fetch(`${base}/chat/completions`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                  model: config.model || p.defaultModel,
+                  messages: [{ role: 'user', content: 'ping' }],
+                  max_tokens: 1,
+                }),
+                signal: AbortSignal.timeout(15000),
+              });
+              if (response.ok || response.status === 200) {
+                console.log(colors.success(`  Connected! Provider is responding.`));
+              } else {
+                console.log(colors.error(`  Connection failed (HTTP ${response.status})`));
+                if (response.status === 401) {
+                  console.log(colors.dim('  Check your API key with /provider key'));
+                }
               }
             } else {
               console.log(colors.error(`  Connection failed (HTTP ${response.status})`));
@@ -655,9 +676,10 @@ async function handleCommand(cmd, rl, agent, ask) {
 
           try {
             const config = getConfig();
-            const url = providerName === 'local'
-              ? `${config.ollamaUrl}/v1/models`
-              : `${p.baseUrl}/models`;
+            const base = providerName === 'local'
+              ? `${config.ollamaUrl}/v1`
+              : p.baseUrl.replace(/\/+$/, '');
+            const url = `${base}/models`;
             const headers = { 'Content-Type': 'application/json' };
             const apiKey = config.providerKeys?.[providerName];
             if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;

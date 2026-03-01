@@ -106,8 +106,8 @@ Mantis supports 17 providers out of the box. All use the OpenAI-compatible chat 
 | `novita` | Novita AI | `https://api.novita.ai/v3/openai` | Yes | `qwen/qwen3-coder-480b-a35b-instruct` |
 | `mistral` | Mistral AI | `https://api.mistral.ai/v1` | Yes | `codestral-latest` |
 | `openai` | OpenAI | `https://api.openai.com/v1` | Yes | `gpt-4o` |
-| `anthropic` | Anthropic (Claude) | `https://api.anthropic.com/v1/` | Yes | `claude-sonnet-4-6` |
-| `gemini` | Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai/` | Yes | `gemini-2.5-flash` |
+| `anthropic` | Anthropic (Claude) | `https://api.anthropic.com/v1` | Yes | `claude-sonnet-4-6` |
+| `gemini` | Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | Yes | `gemini-2.5-flash` |
 | `xai` | xAI (Grok) | `https://api.x.ai/v1` | Yes | `grok-3` |
 | `perplexity` | Perplexity | `https://api.perplexity.ai` | Yes | `sonar-pro` |
 | `sambanova` | SambaNova | `https://api.sambanova.ai/v1` | Yes | `Qwen3-32B` |

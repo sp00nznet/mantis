@@ -50,7 +50,7 @@ export function createAgent() {
     if (config.provider === 'local') {
       url = `${config.ollamaUrl}/v1/chat/completions`;
     } else {
-      url = `${provider.baseUrl}/chat/completions`;
+      url = `${provider.baseUrl.replace(/\/+$/, '')}/chat/completions`;
       const apiKey = config.providerKeys?.[config.provider];
       if (apiKey) {
         headers['Authorization'] = `Bearer ${apiKey}`;
