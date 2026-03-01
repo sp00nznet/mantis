@@ -65,8 +65,8 @@ export const PROVIDERS = {
     name: 'Cerebras',
     baseUrl: 'https://api.cerebras.ai/v1',
     requiresKey: true,
-    defaultModel: 'llama-3.3-70b',
-    description: 'Ultra-fast wafer-scale inference — 2000+ tok/s',
+    defaultModel: 'llama3.1-8b',
+    description: 'Ultra-fast wafer-scale inference — free tier: llama3.1-8b',
   },
   novita: {
     name: 'Novita AI',
