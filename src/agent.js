@@ -296,7 +296,13 @@ async function callLLM(url, model, messages, headers, { onText, onError, onThink
           firstToken = false;
         }
         for (const tc of delta.tool_calls) {
-          const idx = tc.index ?? 0;
+          let idx = tc.index ?? 0;
+          // If this index already has a complete name and we're getting a new name/id,
+          // it's a new tool call (some providers reuse index 0 for all calls)
+          if (toolCalls[idx] && toolCalls[idx].function.name && (tc.id || tc.function?.name)) {
+            // Find next free index
+            while (toolCalls[idx]) idx++;
+          }
           if (!toolCalls[idx]) {
             toolCalls[idx] = {
               id: tc.id || `call_${idx}_${Date.now()}`,
@@ -305,7 +311,7 @@ async function callLLM(url, model, messages, headers, { onText, onError, onThink
             };
           }
           if (tc.id) toolCalls[idx].id = tc.id;
-          if (tc.function?.name) toolCalls[idx].function.name += tc.function.name;
+          if (tc.function?.name) toolCalls[idx].function.name = tc.function.name;
           if (tc.function?.arguments) {
             toolCalls[idx].function.arguments += tc.function.arguments;
             if (onToken) onToken(Math.max(1, Math.round(tc.function.arguments.length / 4)));
