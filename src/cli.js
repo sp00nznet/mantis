@@ -130,8 +130,10 @@ export async function startCLI() {
   }
 
   const prompt = () => {
-    try { if (process.stdin.isTTY && !process.stdin.isRaw) process.stdin.setRawMode(true); } catch {}
-    if (process.stdin.isPaused?.()) process.stdin.resume();
+    // Force-restore stdin state for readline — ORA spinners can leave it stale
+    try { if (process.stdin.isTTY) process.stdin.setRawMode(true); } catch {}
+    process.stdin.resume();
+    rl.resume();
     rl.question(getPromptStr(), async (input) => {
       if (_isBusy) return;
 
@@ -223,6 +225,8 @@ async function handleUserInput(input, rl, agent, opts = {}) {
   thinkingSpinner = ora({
     text: buildThinkingText(),
     indent: 2,
+    stream: process.stderr,
+    discardStdin: false,
   }).start();
 
   const thinkingInterval = setInterval(() => {
