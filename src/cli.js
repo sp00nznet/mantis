@@ -247,7 +247,23 @@ async function handleUserInput(input, rl, agent, opts = {}) {
       },
       onText: (text) => {
         if (_aborted) return;
-        textBuffer += text;
+        // If no spinners are active, stream text directly to stdout
+        if (!thinkingSpinner && !spinner) {
+          if (!hasOutput) {
+            // Flush any pending buffer first
+            if (textBuffer) {
+              process.stdout.write('\n  ');
+              process.stdout.write(textBuffer.replace(/\n/g, '\n  '));
+              textBuffer = '';
+            } else {
+              process.stdout.write('\n  ');
+            }
+            hasOutput = true;
+          }
+          process.stdout.write(text.replace(/\n/g, '\n  '));
+        } else {
+          textBuffer += text;
+        }
       },
       onConfirmToolCall: async (name, args) => {
         if (_aborted) return false;
@@ -317,6 +333,9 @@ async function handleUserInput(input, rl, agent, opts = {}) {
             text: buildThinkingText(),
             indent: 2,
           }).start();
+        } else if (!isThinking && thinkingSpinner) {
+          thinkingSpinner.stop();
+          thinkingSpinner = null;
         }
       },
     })]);
@@ -344,8 +363,9 @@ async function handleUserInput(input, rl, agent, opts = {}) {
     return;
   }
 
-  if (textBuffer && !hasToolCalls) {
-    if (thinkingSpinner) { thinkingSpinner.stop(); thinkingSpinner = null; }
+  // Display any text that was buffered while spinners were active
+  // (streamed text during no-spinner periods was already written in onText)
+  if (textBuffer && !hasOutput) {
     process.stdout.write('\n  ');
     const formatted = textBuffer.replace(/\n/g, '\n  ');
     process.stdout.write(formatted);
