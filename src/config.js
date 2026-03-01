@@ -81,6 +81,55 @@ export const PROVIDERS = {
     defaultModel: 'codestral-latest',
     description: 'Codestral for coding — free tier with 1B tokens/mo',
   },
+  openai: {
+    name: 'OpenAI',
+    baseUrl: 'https://api.openai.com/v1',
+    requiresKey: true,
+    defaultModel: 'gpt-4o',
+    description: 'GPT-4o, o3 and more — the original LLM API',
+  },
+  anthropic: {
+    name: 'Anthropic (Claude)',
+    baseUrl: 'https://api.anthropic.com/v1/',
+    requiresKey: true,
+    defaultModel: 'claude-sonnet-4-6',
+    description: 'Claude Sonnet/Opus — OpenAI compat layer',
+  },
+  gemini: {
+    name: 'Google Gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    requiresKey: true,
+    defaultModel: 'gemini-2.5-flash',
+    description: 'Gemini 2.5 — incredible free tier (1M tokens/day)',
+  },
+  xai: {
+    name: 'xAI (Grok)',
+    baseUrl: 'https://api.x.ai/v1',
+    requiresKey: true,
+    defaultModel: 'grok-3',
+    description: 'Grok-3 — $25 free credits to start',
+  },
+  perplexity: {
+    name: 'Perplexity',
+    baseUrl: 'https://api.perplexity.ai',
+    requiresKey: true,
+    defaultModel: 'sonar-pro',
+    description: 'Search-augmented LLM — live web knowledge',
+  },
+  sambanova: {
+    name: 'SambaNova',
+    baseUrl: 'https://api.sambanova.ai/v1',
+    requiresKey: true,
+    defaultModel: 'Qwen3-32B',
+    description: 'Fast RDU inference — free tier available',
+  },
+  cohere: {
+    name: 'Cohere',
+    baseUrl: 'https://api.cohere.ai/compatibility/v1',
+    requiresKey: true,
+    defaultModel: 'command-a-03-2025',
+    description: 'Command A — enterprise-grade with free trial',
+  },
 };
 
 const DEFAULTS = {
