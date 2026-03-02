@@ -140,6 +140,9 @@ export function createAgent() {
 
     let loopCount = 0;
     const maxLoops = loopLimit || 25;
+    let nudgeCount = 0;     // how many auto-continue nudges we've sent
+    const maxNudges = 3;    // cap to prevent infinite loops
+    let turnToolCalls = 0;  // tool calls made since the user's message
 
     while (loopCount < maxLoops && !_cancelled) {
       loopCount++;
@@ -158,6 +161,21 @@ export function createAgent() {
       messages.push(assistantMessage);
 
       if (!assistantMessage.tool_calls || assistantMessage.tool_calls.length === 0) {
+        // Check if the model stopped prematurely — small models often pause after
+        // a few tool calls to summarize instead of continuing the full task.
+        // Nudge them to keep going if:
+        //   1. The model used tools this turn (was in the middle of work)
+        //   2. Response is short (status update, not a real answer)
+        //   3. We haven't nudged too many times already
+        const responseText = (assistantMessage.content || '').trim();
+        if (turnToolCalls > 0 && responseText.length < 200 && nudgeCount < maxNudges) {
+          nudgeCount++;
+          messages.push({
+            role: 'user',
+            content: '[Continue with the remaining steps. Do not stop or summarize — complete the full task using your tools.]'
+          });
+          continue;
+        }
         return;
       }
 
@@ -172,6 +190,7 @@ export function createAgent() {
         }
 
         totalToolCalls++;
+        turnToolCalls++;
 
         // Confirm tool call with user if callback provided
         if (onConfirmToolCall) {
