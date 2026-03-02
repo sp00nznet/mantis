@@ -301,20 +301,28 @@ export async function callLLM(url, model, messages, headers, provider, { onText,
       return null;
     }
 
-    // Retry on rate limit (429) — parse wait time from response or Retry-After header
+    // Handle 429 — distinguish quota exhaustion from temporary rate limits
     if (response.status === 429 && attempt < maxRetries) {
+      let errBody = '';
+      try { errBody = await response.text(); } catch {}
+
+      // Quota exhaustion is NOT retryable — don't waste time waiting
+      if (errBody.includes('insufficient_quota') || errBody.includes('exceeded your current quota') ||
+          errBody.includes('billing') || errBody.includes('plan_limit')) {
+        if (onThinking) onThinking(false);
+        onError(`Quota exceeded for this provider. Check your plan and billing.\n${errBody}`);
+        return null;
+      }
+
       let waitSec = 5;
       // Check Retry-After header first (standard HTTP)
       const retryAfter = response.headers.get('retry-after');
       if (retryAfter && /^\d+$/.test(retryAfter.trim())) {
         waitSec = parseInt(retryAfter.trim(), 10);
       } else {
-        try {
-          const errBody = await response.text();
-          // Match: "retryDelay": "40s", "retry in 40.2s", "try again in 3s"
-          const match = errBody.match(/(?:retry(?:Delay|[-_ ]?after)?["' :]*(in\s*)?|try again in\s*)([\d.]+)\s*s?/i);
-          if (match) waitSec = Math.ceil(parseFloat(match[2]));
-        } catch {}
+        // Match: "retryDelay": "40s", "retry in 40.2s", "try again in 3s"
+        const match = errBody.match(/(?:retry(?:Delay|[-_ ]?after)?["' :]*(in\s*)?|try again in\s*)([\d.]+)\s*s?/i);
+        if (match) waitSec = Math.ceil(parseFloat(match[2]));
       }
       waitSec = Math.max(waitSec, 1);  // at least 1s
       waitSec = Math.min(waitSec, 120); // cap at 2 min
