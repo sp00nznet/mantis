@@ -222,3 +222,9 @@ export const toolDefinitions = [
     }
   }
 ];
+
+// Read-only subset for swarm workers — no write/edit/run capabilities
+export const readOnlyToolDefinitions = toolDefinitions.filter(t =>
+  ['read_file', 'list_files', 'search_files', 'find_files', 'read_memory']
+    .includes(t.function.name)
+);

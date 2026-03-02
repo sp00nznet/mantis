@@ -10,6 +10,7 @@ import { saveConversation, loadConversation, listConversations } from './convers
 import { getAllSkills, getSkill, saveSkill, deleteSkill, expandSkillPrompt, matchSkillCommand } from './skills.js';
 import { loadAllMemory, clearGlobalMemory, clearProjectMemory, getMemoryStats } from './memory.js';
 import { colors, formatToolCall, truncate, contextBar, formatDuration } from './utils.js';
+import { getSwarmPool, selectLead, runSwarm, excludeFromSwarm, includeInSwarm, classifyComplexity } from './swarm.js';
 
 // Module-level state for interrupt handling
 let _isBusy = false;
@@ -397,6 +398,149 @@ async function handleUserInput(input, rl, agent, opts = {}) {
   console.log();
 }
 
+async function handleSwarmRun(task, leadOverride, rl, agent) {
+  _isBusy = true;
+  _aborted = false;
+  const cancelPromise = new Promise(resolve => { _cancelResolve = resolve; });
+
+  const startTime = Date.now();
+  let spinner = null;
+  let hasOutput = false;
+
+  // Phase label display
+  function phaseLabel(phase) {
+    return chalk.magenta.bold(`  [${phase}]`);
+  }
+
+  console.log(colors.warning('\n  SWARM MODE'));
+
+  let swarmResult;
+
+  try {
+    const swarmPromise = runSwarm(task, {
+      onStatus: (type, provider, data) => {
+        if (_aborted) return;
+        switch (type) {
+          case 'pool': {
+            const complexityTag = data.complexity ? ` | complexity: ${data.complexity}` : '';
+            console.log(colors.dim(`  Pool: ${data.pool.join(', ')}`));
+            console.log(colors.dim(`  Lead: ${data.lead} | ${data.count} providers${complexityTag}\n`));
+            break;
+          }
+          case 'phase':
+            if (spinner) { spinner.stop(); spinner = null; }
+            if (hasOutput) { process.stdout.write('\n'); hasOutput = false; }
+            console.log(phaseLabel(data) + (provider ? colors.dim(` ${provider}`) : ''));
+            break;
+          case 'plan-ready':
+            console.log(colors.dim(`  → ${data.explore} explore, ${data.code} code, ${data.review} review tasks`));
+            break;
+          case 'phase-detail':
+            console.log(colors.dim(`  [${provider}] ${data}`));
+            break;
+          case 'explore-start':
+            if (spinner) spinner.stop();
+            spinner = ora({
+              text: colors.dim(`[${provider}] ${data.length > 60 ? data.slice(0, 60) + '...' : data}`),
+              indent: 2,
+              stream: process.stderr,
+              discardStdin: false,
+            }).start();
+            break;
+          case 'explore-done':
+            if (spinner) { spinner.succeed(colors.dim(`[${provider}] ${data} done`)); spinner = null; }
+            break;
+          case 'explore-fail':
+            if (spinner) { spinner.fail(colors.dim(`[${provider}] failed: ${data}`)); spinner = null; }
+            break;
+          case 'fallback':
+            if (spinner) { spinner.stop(); spinner = null; }
+            console.log(colors.warning(`  [${provider}] ${data}`));
+            break;
+          case 'worker-tool':
+            if (spinner) spinner.text = colors.dim(`[${provider}] ${data}...`);
+            break;
+          case 'worker-error':
+            console.log(colors.dim(`  [${provider}] ${data}`));
+            break;
+          case 'review-done':
+            if (spinner) { spinner.stop(); spinner = null; }
+            console.log(colors.dim(`  [${provider}] Review: ${typeof data === 'string' ? data.split('\n')[0].slice(0, 80) : 'done'}`));
+            break;
+          case 'review-tool':
+            break; // silent
+          case 'error':
+            if (spinner) { spinner.fail('Error'); spinner = null; }
+            console.log('  ' + colors.error(data));
+            break;
+        }
+      },
+      onText: (text) => {
+        if (_aborted) return;
+        if (spinner) { spinner.stop(); spinner = null; }
+        if (!hasOutput) { process.stdout.write('\n  '); hasOutput = true; }
+        process.stdout.write(text.replace(/\n/g, '\n  '));
+      },
+      onToolCall: (name, args, provider) => {
+        if (_aborted) return;
+        if (spinner) { spinner.stop(); spinner = null; }
+        if (hasOutput) { process.stdout.write('\n'); hasOutput = false; }
+        console.log(`\n  ${colors.dim(`[${provider}]`)} ${formatToolCall(name, args)}`);
+        spinner = ora({
+          text: colors.dim(`Running ${name}...`),
+          indent: 2,
+          stream: process.stderr,
+          discardStdin: false,
+        }).start();
+      },
+      onToolResult: (name, result, provider) => {
+        if (_aborted) return;
+        if (spinner) { spinner.succeed(colors.dim(`${name} done`)); spinner = null; }
+        const preview = result.split('\n').slice(0, 3).join('\n');
+        console.log(colors.toolResult('  ' + truncate(preview, 200).replace(/\n/g, '\n  ')));
+      },
+    }, { leadOverride });
+
+    swarmResult = await Promise.race([cancelPromise, swarmPromise]);
+  } catch (err) {
+    if (spinner) { spinner.fail('Error'); spinner = null; }
+    if (!_aborted) {
+      console.log('\n  ' + colors.error(`Swarm error: ${err.message}`));
+    }
+  }
+
+  if (spinner) { spinner.stop(); spinner = null; }
+  process.stdout.write('\x1B[?25h');
+  process.stderr.write('\x1B[?25h');
+  _cancelResolve = null;
+
+  if (_aborted) {
+    _aborted = false;
+    // Cancel the swarm if it has a cancel function
+    if (swarmResult?.cancel) swarmResult.cancel();
+    console.log(colors.warning('\n\n  Swarm interrupted.'));
+    console.log(colors.dim('  Partial results may have been applied.\n'));
+    _isBusy = false;
+    return;
+  }
+
+  if (hasOutput) process.stdout.write('\n');
+
+  const elapsed = Date.now() - startTime;
+
+  if (swarmResult?.success) {
+    console.log(colors.success(`\n  Swarm complete. ${swarmResult.totalProviders} providers, ${formatDuration(elapsed)}`));
+    if (swarmResult.reviewResult) {
+      console.log(colors.dim(`  Review: ${swarmResult.reviewResult.split('\n')[0].slice(0, 100)}`));
+    }
+  } else if (swarmResult) {
+    console.log(colors.warning(`\n  Swarm finished with issues. ${formatDuration(elapsed)}`));
+  }
+
+  console.log();
+  _isBusy = false;
+}
+
 async function handleCommand(cmd, rl, agent, ask) {
   const parts = cmd.split(/\s+/);
   const command = parts[0].toLowerCase();
@@ -770,6 +914,105 @@ async function handleCommand(cmd, rl, agent, ask) {
       _autonomousMode = false;
 
       console.log(colors.success('  Autonomous mode complete.\n'));
+      break;
+    }
+
+    // ─── Swarm mode ─────────────────────────────────────────────
+
+    case '/swarm': {
+      // Parse --lead and --list flags
+      const swarmParts = args.split(/\s+/);
+      let leadOverride = null;
+      let showList = false;
+      const taskParts = [];
+
+      for (let i = 0; i < swarmParts.length; i++) {
+        if (swarmParts[i] === '--list') {
+          showList = true;
+        } else if (swarmParts[i] === '--lead' && swarmParts[i + 1]) {
+          leadOverride = swarmParts[i + 1].toLowerCase();
+          i++; // skip the value
+        } else {
+          taskParts.push(swarmParts[i]);
+        }
+      }
+      const swarmTask = taskParts.join(' ').trim();
+
+      // /swarm remove <provider> — exclude from pool
+      if (swarmParts[0] === 'remove' || swarmParts[0] === 'exclude') {
+        const target = swarmParts[1]?.toLowerCase();
+        if (!target) {
+          console.log(colors.error('  Usage: /swarm remove <provider>\n'));
+          break;
+        }
+        if (!PROVIDERS[target]) {
+          console.log(colors.error(`  Unknown provider: ${target}\n`));
+          break;
+        }
+        excludeFromSwarm(target);
+        console.log(colors.success(`  ${target} excluded from swarm pool.`));
+        console.log(colors.dim('  Use /swarm add to re-include it.\n'));
+        break;
+      }
+
+      // /swarm add <provider> — re-include in pool
+      if (swarmParts[0] === 'add' || swarmParts[0] === 'include') {
+        const target = swarmParts[1]?.toLowerCase();
+        if (!target) {
+          console.log(colors.error('  Usage: /swarm add <provider>\n'));
+          break;
+        }
+        if (!PROVIDERS[target]) {
+          console.log(colors.error(`  Unknown provider: ${target}\n`));
+          break;
+        }
+        includeInSwarm(target);
+        console.log(colors.success(`  ${target} re-included in swarm pool.\n`));
+        break;
+      }
+
+      // /swarm --list — show pool and auto-selected lead
+      if (showList || (!swarmTask && !leadOverride)) {
+        const pool = getSwarmPool();
+        if (pool.length === 0) {
+          console.log(colors.error('\n  No providers configured for swarm.'));
+          console.log(colors.dim('  Use /provider key <name> <apikey> to add providers.\n'));
+          break;
+        }
+
+        const lead = selectLead(pool, leadOverride);
+        console.log(colors.header('\n  Swarm Pool'));
+        console.log(colors.dim(`  ${pool.length} provider${pool.length !== 1 ? 's' : ''} available\n`));
+
+        for (const p of pool) {
+          const role = p.key === lead.key ? colors.success(' (lead)') : colors.dim(' (worker)');
+          const rpm = p.provider.rateLimit?.rpm ? colors.dim(` ${p.provider.rateLimit.rpm} RPM`) : '';
+          console.log(`  ${colors.toolName(p.key.padEnd(14))} ${p.provider.name}${rpm}${role}`);
+        }
+
+        const swarmExcluded = getConfig().swarm?.excludeProviders || [];
+        if (swarmExcluded.length > 0) {
+          console.log(colors.dim(`\n  Excluded: ${swarmExcluded.join(', ')}`));
+        }
+
+        if (pool.length < 2) {
+          console.log(colors.warning('\n  Swarm needs at least 2 providers. Add more with /provider key'));
+        } else {
+          console.log(colors.dim(`\n  Usage: /swarm <task>`));
+          console.log(colors.dim(`  Override lead: /swarm --lead ${lead.key} <task>\n`));
+        }
+        break;
+      }
+
+      if (!swarmTask) {
+        console.log(colors.error('  Usage: /swarm <task>'));
+        console.log(colors.dim('  Example: /swarm refactor the auth module'));
+        console.log(colors.dim('  Options: --lead <provider>, --list\n'));
+        break;
+      }
+
+      // Run swarm
+      await handleSwarmRun(swarmTask, leadOverride, rl, agent);
       break;
     }
 
@@ -1167,6 +1410,14 @@ function printHelp() {
   ${colors.header('Autonomous Mode')}
   ${colors.toolName('/auto <task>')}       Run a task autonomously (no confirmations)
   ${colors.dim('  Example: /auto create a todo app with React and Express')}
+
+  ${colors.header('Swarm Mode')}
+  ${colors.toolName('/swarm <task>')}      Use ALL configured providers in parallel
+  ${colors.toolName('/swarm --list')}      Show swarm pool and auto-selected lead
+  ${colors.toolName('/swarm --lead <p>')}  Force a specific provider as lead
+  ${colors.toolName('/swarm remove <p>')}  Exclude a provider from the pool
+  ${colors.toolName('/swarm add <p>')}     Re-include an excluded provider
+  ${colors.dim('  Example: /swarm refactor the auth module')}
 
   ${colors.header('Memory')}
   ${colors.toolName('/memory')}            Show saved memory (project + global)

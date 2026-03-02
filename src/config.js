@@ -146,6 +146,12 @@ const DEFAULTS = {
   theme: 'default',
   provider: 'local',        // active provider key
   providerKeys: {},          // { together: 'key...', groq: 'key...' }
+  swarm: {
+    leadProvider: null,       // null = auto-select, or 'groq', 'claude', etc.
+    maxParallelWorkers: 4,    // cap parallel exploration workers
+    excludeProviders: [],     // providers excluded from swarm pool
+    bestOfN: 0,               // 0 = off, 2-3 = send code tasks to N providers, pick best
+  },
 };
 
 let config = { ...DEFAULTS };

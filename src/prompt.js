@@ -92,6 +92,98 @@ You are currently in PLAN MODE. In this mode:
 }
 
 /**
+ * Build the planning prompt for the swarm lead.
+ * The lead decomposes a task into explore/code/review subtasks.
+ */
+export function buildSwarmPlanPrompt(task) {
+  return `You are the LEAD orchestrator in a multi-provider swarm. Your job is to decompose a coding task into subtasks.
+
+TASK: ${task}
+
+Respond with ONLY a JSON object (no markdown fences, no explanation) with this structure:
+{
+  "explore": [
+    { "id": "e1", "description": "Short description of what to explore/search/read" },
+    { "id": "e2", "description": "..." }
+  ],
+  "code": [
+    { "id": "c1", "description": "What code to write/edit, including file paths if known", "dependsOn": ["e1", "e2"] }
+  ],
+  "review": {
+    "description": "What to check in the final review"
+  }
+}
+
+Rules:
+- "explore" tasks are read-only: reading files, searching, listing directories. They run in parallel on different providers.
+- "code" tasks are sequential writes performed by you (the lead). They depend on explore results.
+- "review" is optional — a final quality check by a different provider.
+- Keep explore tasks focused: 1-3 tool calls each.
+- If the task is simple (single file edit), use 1 explore + 1 code + 0 review.
+- Maximum 6 explore tasks, 3 code tasks.`;
+}
+
+/**
+ * Build a worker prompt for swarm exploration subtasks.
+ * Workers only have read-only tools.
+ */
+export function buildSwarmWorkerPrompt(subtask, cwd) {
+  return `You are a WORKER in a multi-provider swarm. You have READ-ONLY access to the codebase.
+
+Working directory: ${cwd}
+
+YOUR TASK: ${subtask}
+
+Rules:
+- Use your tools to explore: read_file, list_files, search_files, find_files, read_memory.
+- You CANNOT write, edit, or run commands.
+- Be thorough but concise. Report what you find.
+- Focus only on your assigned subtask.
+- Respond with a summary of your findings when done.`;
+}
+
+/**
+ * Build the architect prompt — the lead reasons about the solution in natural language.
+ * No tools, no code editing — pure reasoning about what to change and why.
+ */
+export function buildArchitectPrompt(task, explorationContext, codeDescriptions) {
+  return `You are the ARCHITECT in an Architect/Editor workflow. Your job is to reason about a coding task and describe the solution in detail.
+
+Workers explored the codebase and found:
+---EXPLORATION RESULTS---
+${explorationContext}
+---END RESULTS---
+
+Task: ${task}
+
+Code tasks:
+${codeDescriptions}
+
+Describe the solution in natural language. For each file that needs changing:
+1. State the file path
+2. Describe exactly what to change (which functions, which lines, what logic)
+3. Show the actual code that should be written (complete, not pseudocode)
+4. Explain why
+
+Be specific enough that a separate editor agent can make the exact changes without additional context.
+Do NOT use tools — just describe the solution.`;
+}
+
+/**
+ * Build the editor prompt — takes the architect's solution and makes the actual edits.
+ * Gets full tool access to write/edit files.
+ */
+export function buildEditorPrompt(architectSolution) {
+  return `You are the EDITOR in an Architect/Editor workflow. The Architect has designed a solution. Your job is to implement it exactly using your tools.
+
+---ARCHITECT'S SOLUTION---
+${architectSolution}
+---END SOLUTION---
+
+Implement the changes described above. Use edit_file for surgical changes and write_file for new files. Follow the Architect's instructions precisely — do not deviate or add extras.`;
+}
+
+/**
  * Build an autonomous mode system prompt wrapper.
  * Injected when the user runs /auto <task>.
  */
