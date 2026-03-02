@@ -146,8 +146,10 @@ Rules:
  * Build the architect prompt — the lead reasons about the solution in natural language.
  * No tools, no code editing — pure reasoning about what to change and why.
  */
-export function buildArchitectPrompt(task, explorationContext, codeDescriptions) {
+export function buildArchitectPrompt(task, explorationContext, codeDescriptions, cwd) {
   return `You are the ARCHITECT in an Architect/Editor workflow. Your job is to reason about a coding task and describe the solution in detail.
+
+Working directory: ${cwd}
 
 Workers explored the codebase and found:
 ---EXPLORATION RESULTS---
@@ -159,8 +161,14 @@ Task: ${task}
 Code tasks:
 ${codeDescriptions}
 
-Describe the solution in natural language. For each file that needs changing:
-1. State the file path
+CRITICAL RULES:
+- ONLY reference files and code that appear in the exploration results above.
+- If the exploration results are empty or errored, say "INSUFFICIENT CONTEXT" and list what files you would need to read. Do NOT guess or invent file contents.
+- All file paths must be relative to the working directory: ${cwd}
+- Do NOT invent files, functions, or code that wasn't found in exploration.
+
+For each file that needs changing:
+1. State the exact file path (from the exploration results)
 2. Describe exactly what to change (which functions, which lines, what logic)
 3. Show the actual code that should be written (complete, not pseudocode)
 4. Explain why
@@ -173,14 +181,22 @@ Do NOT use tools — just describe the solution.`;
  * Build the editor prompt — takes the architect's solution and makes the actual edits.
  * Gets full tool access to write/edit files.
  */
-export function buildEditorPrompt(architectSolution) {
+export function buildEditorPrompt(architectSolution, cwd) {
   return `You are the EDITOR in an Architect/Editor workflow. The Architect has designed a solution. Your job is to implement it exactly using your tools.
+
+Working directory: ${cwd}
 
 ---ARCHITECT'S SOLUTION---
 ${architectSolution}
 ---END SOLUTION---
 
-Implement the changes described above. Use edit_file for surgical changes and write_file for new files. Follow the Architect's instructions precisely — do not deviate or add extras.`;
+Rules:
+- ALWAYS read_file before using edit_file. Never guess at file contents.
+- Use edit_file for surgical changes (old_string → new_string).
+- Use write_file only for new files.
+- All file paths are relative to the working directory above.
+- Follow the Architect's instructions precisely — do not deviate, add extras, or invent changes.
+- If the Architect says "INSUFFICIENT CONTEXT", stop and report the issue. Do not proceed.`;
 }
 
 /**

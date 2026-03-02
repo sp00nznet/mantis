@@ -151,6 +151,7 @@ const DEFAULTS = {
     maxParallelWorkers: 4,    // cap parallel exploration workers
     excludeProviders: [],     // providers excluded from swarm pool
     bestOfN: 0,               // 0 = off, 2-3 = send code tasks to N providers, pick best
+    providerModels: {},       // override default models per provider: { groq: 'llama-3.3-70b', local: 'qwen2.5-coder:14b' }
   },
 };
 

@@ -160,7 +160,22 @@ function buildProviderConnection(providerKey) {
     }
   }
 
-  const model = providerKey === config.provider ? config.model : provider.defaultModel;
+  // Model resolution priority:
+  // 1. swarm.providerModels override (user explicitly set a model for this provider in swarm)
+  // 2. config.model if this is the currently active provider
+  // 3. config.model if this is 'local' (use whatever the user has configured, not the default)
+  // 4. provider.defaultModel (fallback)
+  const swarmModels = config.swarm?.providerModels || {};
+  let model;
+  if (swarmModels[providerKey]) {
+    model = swarmModels[providerKey];
+  } else if (providerKey === config.provider) {
+    model = config.model;
+  } else if (providerKey === 'local') {
+    model = config.model; // local should use whatever model the user has pulled/configured
+  } else {
+    model = provider.defaultModel;
+  }
 
   return { url, headers, model, provider };
 }
@@ -381,9 +396,10 @@ async function runArchitectPhase(lead, plan, context, originalTask, onStatus, on
   if (!conn) return null;
 
   const rateLimiter = createRateLimiter();
+  const cwd = getWorkingDirectory();
   const codeDescriptions = plan.code.map(c => `- ${c.description}`).join('\n');
   const messages = [
-    { role: 'system', content: buildArchitectPrompt(originalTask, context, codeDescriptions) },
+    { role: 'system', content: buildArchitectPrompt(originalTask, context, codeDescriptions, cwd) },
     { role: 'user', content: originalTask },
   ];
 
@@ -415,7 +431,7 @@ async function runEditorPhase(editor, architectSolution, onStatus, onText, onToo
   const cwd = getWorkingDirectory();
   const messages = [
     { role: 'system', content: buildSystemPrompt(cwd, 'normal') },
-    { role: 'user', content: buildEditorPrompt(architectSolution) },
+    { role: 'user', content: buildEditorPrompt(architectSolution, cwd) },
   ];
 
   let loopCount = 0;
@@ -463,6 +479,47 @@ async function runEditorPhase(editor, architectSolution, onStatus, onText, onToo
  * Falls back to single-provider (lead does both) when no workers are free.
  */
 async function runCodePhase(lead, workers, plan, context, originalTask, onStatus, onText, onToolCall, onToolResult, isCancelled) {
+  // If context is null, exploration completely failed — lead must explore + code with full tools
+  if (context === null) {
+    if (onStatus) onStatus('phase-detail', lead.key, 'Fallback: lead exploring and coding with full tools...');
+    const conn = buildProviderConnection(lead.key);
+    if (!conn) return;
+    const rateLimiter = createRateLimiter();
+    const cwd = getWorkingDirectory();
+    const codeDescriptions = plan.code.map(c => `- ${c.description}`).join('\n');
+    const messages = [
+      { role: 'system', content: buildSystemPrompt(cwd, 'normal') },
+      { role: 'user', content: `${originalTask}\n\nPrevious exploration attempts failed. You need to explore the codebase yourself first, then implement the changes.\n\nPlanned code tasks:\n${codeDescriptions}` },
+    ];
+    let loopCount = 0;
+    const maxLoops = 20;
+    while (loopCount < maxLoops) {
+      if (isCancelled()) return;
+      loopCount++;
+      let responseText = '';
+      const assistantMsg = await callLLM(conn.url, conn.model, messages, conn.headers, conn.provider, {
+        onText: (text) => { responseText += text; if (onText) onText(text); },
+        onError: (err) => { if (onStatus) onStatus('error', lead.key, err); },
+        onThinking: () => {}, onToken: () => {},
+        rateLimiter, tools: toolDefinitions,
+      }, isCancelled);
+      if (!assistantMsg || isCancelled()) return;
+      messages.push(assistantMsg);
+      if (!assistantMsg.tool_calls || assistantMsg.tool_calls.length === 0) return;
+      for (const toolCall of assistantMsg.tool_calls) {
+        if (isCancelled()) return;
+        const fnName = toolCall.function.name;
+        let args = {};
+        try { args = JSON.parse(toolCall.function.arguments || '{}'); } catch {}
+        if (onToolCall) onToolCall(fnName, args, lead.key);
+        const result = await executeTool(fnName, args);
+        if (onToolResult) onToolResult(fnName, result, lead.key);
+        messages.push({ role: 'tool', tool_call_id: toolCall.id, content: result });
+      }
+    }
+    return;
+  }
+
   // Pick the fastest available worker as the editor (prefer high RPM providers)
   const editorCandidate = workers.length > 0
     ? workers.reduce((best, w) => {
@@ -580,9 +637,10 @@ async function getArchitectSolution(providerEntry, plan, context, task, isCancel
   if (!conn) return { provider: providerEntry.key, solution: null };
 
   const rateLimiter = createRateLimiter();
+  const cwd = getWorkingDirectory();
   const codeDescriptions = plan.code.map(c => `- ${c.description}`).join('\n');
   const messages = [
-    { role: 'system', content: buildArchitectPrompt(task, context, codeDescriptions) },
+    { role: 'system', content: buildArchitectPrompt(task, context, codeDescriptions, cwd) },
     { role: 'user', content: task },
   ];
 
@@ -751,11 +809,18 @@ export async function runSwarm(task, callbacks = {}, options = {}) {
     if (_cancelled) return { success: false, cancel };
 
     mergedContext = mergeExplorationResults(exploreResults);
+
+    // Check if exploration actually returned useful content
+    const usefulResults = exploreResults.filter(r => r.result && r.result !== '(no response)');
+    if (usefulResults.length === 0) {
+      if (onStatus) onStatus('phase-detail', null, 'Exploration returned no useful results — lead will explore with full tools');
+      mergedContext = null; // Signal to code phase: skip architect, use fallback with full tools
+    }
   } else {
     mergedContext = '(no exploration needed)';
   }
 
-  // Phase 3: Code Writing (architect/editor split)
+  // Phase 3: Code Writing (architect/editor split, or fallback if exploration failed)
   if (onStatus) onStatus('phase', lead.key, 'CODE');
   await runCodePhase(lead, workers, plan, mergedContext, task, onStatus, onText, onToolCall, onToolResult, isCancelled);
   if (_cancelled) return { success: false, cancel };
