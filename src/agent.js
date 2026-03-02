@@ -306,9 +306,15 @@ export async function callLLM(url, model, messages, headers, provider, { onText,
       let errBody = '';
       try { errBody = await response.text(); } catch {}
 
-      // Quota exhaustion is NOT retryable — don't waste time waiting
-      if (errBody.includes('insufficient_quota') || errBody.includes('exceeded your current quota') ||
-          errBody.includes('billing') || errBody.includes('plan_limit')) {
+      // Quota exhaustion is NOT retryable — don't waste time waiting.
+      // Be precise: "billing" appears in URLs of retryable errors too (e.g. Groq's
+      // TPM rate limit includes console.groq.com/settings/billing in the message).
+      // Only match actual quota/billing error codes, not URLs containing "billing".
+      const isQuotaError = errBody.includes('"insufficient_quota"') ||
+        errBody.includes('"exceeded your current quota"') ||
+        errBody.includes('"plan_limit"') ||
+        errBody.includes('"budget_exceeded"');
+      if (isQuotaError) {
         if (onThinking) onThinking(false);
         onError(`Quota exceeded for this provider. Check your plan and billing.\n${errBody}`);
         return null;

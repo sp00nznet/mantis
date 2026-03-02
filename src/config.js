@@ -29,7 +29,7 @@ export const PROVIDERS = {
     name: 'Fireworks AI',
     baseUrl: 'https://api.fireworks.ai/inference/v1',
     requiresKey: true,
-    defaultModel: 'accounts/fireworks/models/qwen2p5-coder-32b-instruct',
+    defaultModel: 'accounts/fireworks/models/qwen3-coder-480b-a35b-instruct',
     description: 'Fast cloud inference — free tier available',
   },
   groq: {
