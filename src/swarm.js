@@ -220,16 +220,27 @@ async function decomposeTask(lead, task, onStatus, isCancelled) {
 
   // Parse the JSON plan from response
   try {
-    // Try to extract JSON from the response (might have markdown fences)
     let json = responseText.trim();
+
+    // Strip <think>...</think> blocks (reasoning models like Qwen3, DeepSeek)
+    json = json.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+
+    // Try to extract from ```json ... ``` code fences first
     const fenceMatch = json.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
     if (fenceMatch) json = fenceMatch[1].trim();
 
-    // Find the outermost { ... }
+    // Find the outermost { ... } using brace counting (safe against nested objects)
     const start = json.indexOf('{');
-    const end = json.lastIndexOf('}');
-    if (start !== -1 && end !== -1) {
-      json = json.slice(start, end + 1);
+    if (start !== -1) {
+      let depth = 0;
+      let end = -1;
+      for (let i = start; i < json.length; i++) {
+        if (json[i] === '{') depth++;
+        else if (json[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+      }
+      if (end !== -1) {
+        json = json.slice(start, end + 1);
+      }
     }
 
     return JSON.parse(json);
