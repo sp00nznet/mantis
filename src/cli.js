@@ -406,6 +406,7 @@ async function handleSwarmRun(task, leadOverride, rl, agent) {
   const startTime = Date.now();
   let spinner = null;
   let hasOutput = false;
+  let inThinkBlock = false; // track <think> blocks to suppress them
 
   // Phase label display
   function phaseLabel(phase) {
@@ -415,9 +416,10 @@ async function handleSwarmRun(task, leadOverride, rl, agent) {
   console.log(colors.warning('\n  SWARM MODE'));
 
   let swarmResult;
+  let swarmCancel = null;
 
   try {
-    const swarmPromise = runSwarm(task, {
+    const swarm = runSwarm(task, {
       onStatus: (type, provider, data) => {
         if (_aborted) return;
         switch (type) {
@@ -477,9 +479,31 @@ async function handleSwarmRun(task, leadOverride, rl, agent) {
       },
       onText: (text) => {
         if (_aborted) return;
+        // Filter out <think>...</think> blocks (reasoning models like Qwen3, DeepSeek)
+        let filtered = text;
+        if (inThinkBlock) {
+          const endIdx = filtered.indexOf('</think>');
+          if (endIdx === -1) return; // still inside think block, suppress entirely
+          filtered = filtered.slice(endIdx + 8);
+          inThinkBlock = false;
+        }
+        // Check for new <think> opening
+        const startIdx = filtered.indexOf('<think>');
+        if (startIdx !== -1) {
+          const before = filtered.slice(0, startIdx);
+          const after = filtered.slice(startIdx + 7);
+          const endIdx = after.indexOf('</think>');
+          if (endIdx !== -1) {
+            filtered = before + after.slice(endIdx + 8);
+          } else {
+            filtered = before;
+            inThinkBlock = true;
+          }
+        }
+        if (!filtered) return;
         if (spinner) { spinner.stop(); spinner = null; }
         if (!hasOutput) { process.stdout.write('\n  '); hasOutput = true; }
-        process.stdout.write(text.replace(/\n/g, '\n  '));
+        process.stdout.write(filtered.replace(/\n/g, '\n  '));
       },
       onToolCall: (name, args, provider) => {
         if (_aborted) return;
@@ -501,7 +525,8 @@ async function handleSwarmRun(task, leadOverride, rl, agent) {
       },
     }, { leadOverride });
 
-    swarmResult = await Promise.race([cancelPromise, swarmPromise]);
+    swarmCancel = swarm.cancel; // grab cancel function immediately — available before promise resolves
+    swarmResult = await Promise.race([cancelPromise, swarm.promise]);
   } catch (err) {
     if (spinner) { spinner.fail('Error'); spinner = null; }
     if (!_aborted) {
@@ -516,8 +541,8 @@ async function handleSwarmRun(task, leadOverride, rl, agent) {
 
   if (_aborted) {
     _aborted = false;
-    // Cancel the swarm if it has a cancel function
-    if (swarmResult?.cancel) swarmResult.cancel();
+    // Cancel the swarm — sets _cancelled flag so all workers stop
+    if (swarmCancel) swarmCancel();
     console.log(colors.warning('\n\n  Swarm interrupted.'));
     console.log(colors.dim('  Partial results may have been applied.\n'));
     _isBusy = false;
@@ -942,6 +967,11 @@ async function handleCommand(cmd, rl, agent, ask) {
         }
       }
       const swarmTask = taskParts.join(' ').trim();
+
+      // /swarm list — same as --list
+      if (swarmParts[0] === 'list' || swarmParts[0] === 'ls') {
+        showList = true;
+      }
 
       // /swarm remove <provider> — exclude from pool
       if (swarmParts[0] === 'remove' || swarmParts[0] === 'exclude') {

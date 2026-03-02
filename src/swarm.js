@@ -809,22 +809,29 @@ async function runReviewPhase(reviewer, reviewDescription, explorationContext, o
  * @param {object} options - { leadOverride, signal }
  * @returns {object} { success, totalCalls, totalProviders, elapsed }
  */
-export async function runSwarm(task, callbacks = {}, options = {}) {
-  const { onStatus, onText, onToolCall, onToolResult } = callbacks;
-  const { leadOverride } = options;
-
+/**
+ * Run a swarm across all configured providers.
+ * Returns { promise, cancel } synchronously so the caller can cancel mid-run.
+ */
+export function runSwarm(task, callbacks = {}, options = {}) {
   let _cancelled = false;
   const isCancelled = () => _cancelled;
-
-  // Allow external cancellation
   const cancel = () => { _cancelled = true; };
+
+  const promise = _runSwarmInner(task, callbacks, options, isCancelled);
+  return { promise, cancel };
+}
+
+async function _runSwarmInner(task, callbacks, options, isCancelled) {
+  const { onStatus, onText, onToolCall, onToolResult } = callbacks;
+  const { leadOverride } = options;
 
   const startTime = Date.now();
   const pool = getSwarmPool();
 
   if (pool.length < 2) {
     if (onStatus) onStatus('error', null, 'Swarm needs at least 2 configured providers. Use /provider key <name> <key> to add more.');
-    return { success: false, cancel };
+    return { success: false };
   }
 
   const complexity = classifyComplexity(task);
@@ -837,11 +844,11 @@ export async function runSwarm(task, callbacks = {}, options = {}) {
   if (onStatus) onStatus('phase', lead.key, 'PLAN');
   const plan = await decomposeTask(lead, task, onStatus, isCancelled);
 
-  if (_cancelled) return { success: false, cancel };
+  if (_cancelled) return { success: false };
 
   if (!plan || !plan.explore || !plan.code) {
     if (onStatus) onStatus('error', lead.key, 'Could not decompose task — plan was empty or invalid');
-    return { success: false, cancel };
+    return { success: false };
   }
 
   if (onStatus) onStatus('plan-ready', lead.key, {
@@ -855,7 +862,7 @@ export async function runSwarm(task, callbacks = {}, options = {}) {
   if (plan.explore.length > 0) {
     if (onStatus) onStatus('phase', null, 'EXPLORE');
     const exploreResults = await runParallelExplorers(plan.explore, workers, onStatus, isCancelled);
-    if (_cancelled) return { success: false, cancel };
+    if (_cancelled) return { success: false };
 
     mergedContext = mergeExplorationResults(exploreResults);
 
@@ -872,7 +879,7 @@ export async function runSwarm(task, callbacks = {}, options = {}) {
   // Phase 3: Code Writing (architect/editor split, or fallback if exploration failed)
   if (onStatus) onStatus('phase', lead.key, 'CODE');
   await runCodePhase(lead, workers, plan, mergedContext, task, onStatus, onText, onToolCall, onToolResult, isCancelled);
-  if (_cancelled) return { success: false, cancel };
+  if (_cancelled) return { success: false };
 
   // Phase 4: Review (optional, uses a different worker)
   let reviewResult = null;
@@ -886,10 +893,9 @@ export async function runSwarm(task, callbacks = {}, options = {}) {
 
   const elapsed = Date.now() - startTime;
   return {
-    success: !_cancelled,
+    success: !isCancelled(),
     totalProviders: pool.length,
     elapsed,
-    cancel,
     reviewResult,
   };
 }
