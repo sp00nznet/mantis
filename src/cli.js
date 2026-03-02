@@ -735,7 +735,7 @@ async function handleCommand(cmd, rl, agent, ask) {
         }
 
         case 'set': {
-          const providerName = subArgs.trim().toLowerCase();
+          const providerName = subArgs.trim().split(/\s+/)[0]?.toLowerCase();
           if (!providerName) {
             console.log(colors.error('  Usage: /provider set <name>\n'));
             break;
@@ -744,6 +744,11 @@ async function handleCommand(cmd, rl, agent, ask) {
             console.log(colors.error(`  Unknown provider: ${providerName}`));
             console.log(colors.dim('  Use /provider list to see available providers.\n'));
             break;
+          }
+          // If extra args look like an API key, hint the user
+          const extraArgs = subArgs.trim().split(/\s+/).slice(1).join(' ');
+          if (extraArgs && (extraArgs.startsWith('sk-') || extraArgs.length > 20)) {
+            console.log(colors.warning(`  Looks like you included an API key. Use: /provider key ${providerName} <your-key>`));
           }
           const p = PROVIDERS[providerName];
           saveConfig({

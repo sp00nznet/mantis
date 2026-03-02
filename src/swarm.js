@@ -1,7 +1,6 @@
 import { callLLM, createRateLimiter } from './agent.js';
 import { getConfig, saveConfig, PROVIDERS } from './config.js';
-import { readOnlyToolDefinitions } from './tool-definitions.js';
-import { toolDefinitions } from './tool-definitions.js';
+import { readOnlyToolDefinitions, toolDefinitions } from './tool-definitions.js';
 import { buildSwarmPlanPrompt, buildSwarmWorkerPrompt, buildSystemPrompt, buildArchitectPrompt, buildEditorPrompt } from './prompt.js';
 import { executeTool, getWorkingDirectory } from './tools.js';
 
