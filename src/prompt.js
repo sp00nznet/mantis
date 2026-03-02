@@ -95,8 +95,13 @@ You are currently in PLAN MODE. In this mode:
  * Build the planning prompt for the swarm lead.
  * The lead decomposes a task into explore/code/review subtasks.
  */
-export function buildSwarmPlanPrompt(task) {
+export function buildSwarmPlanPrompt(task, cwd, fileList) {
   return `You are the LEAD orchestrator in a multi-provider swarm. Your job is to decompose a coding task into subtasks.
+
+Working directory: ${cwd}
+
+Files in the project:
+${fileList || '(unknown — first explore task should list files)'}
 
 TASK: ${task}
 
@@ -114,13 +119,15 @@ Respond with ONLY a JSON object (no markdown fences, no explanation) with this s
   }
 }
 
-Rules:
+CRITICAL RULES:
+- All file paths and descriptions MUST relate to the actual project in ${cwd}. Do NOT invent files or modules that aren't listed above.
 - "explore" tasks are read-only: reading files, searching, listing directories. They run in parallel on different providers.
-- "code" tasks are sequential writes performed by you (the lead). They depend on explore results.
+- "code" tasks are sequential writes performed by the lead. They depend on explore results.
 - "review" is optional — a final quality check by a different provider.
-- Keep explore tasks focused: 1-3 tool calls each.
+- Keep explore tasks focused: 1-3 tool calls each. Reference actual files/directories from the listing above.
 - If the task is simple (single file edit), use 1 explore + 1 code + 0 review.
-- Maximum 6 explore tasks, 3 code tasks.`;
+- Maximum 6 explore tasks, 3 code tasks.
+- If the task is vague (like "continue work"), the first explore task should read relevant files to understand what needs to be done.`;
 }
 
 /**

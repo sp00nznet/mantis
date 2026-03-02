@@ -162,17 +162,17 @@ function buildProviderConnection(providerKey) {
 
   // Model resolution priority:
   // 1. swarm.providerModels override (user explicitly set a model for this provider in swarm)
-  // 2. config.model if this is the currently active provider
-  // 3. config.model if this is 'local' (use whatever the user has configured, not the default)
-  // 4. provider.defaultModel (fallback)
+  // 2. config.model ONLY if this is the currently active provider
+  // 3. provider.defaultModel (fallback — may not exist on user's account!)
+  //
+  // NOTE: We do NOT use config.model for non-active providers. e.g. if active
+  // provider is cerebras with llama3.1-8b, we must NOT send that to local Ollama.
   const swarmModels = config.swarm?.providerModels || {};
   let model;
   if (swarmModels[providerKey]) {
     model = swarmModels[providerKey];
   } else if (providerKey === config.provider) {
     model = config.model;
-  } else if (providerKey === 'local') {
-    model = config.model; // local should use whatever model the user has pulled/configured
   } else {
     model = provider.defaultModel;
   }
@@ -190,9 +190,19 @@ async function decomposeTask(lead, task, onStatus, isCancelled) {
   const conn = buildProviderConnection(lead.key);
   if (!conn) return null;
 
+  // Get a quick directory listing so the lead knows what project it's in
+  const cwd = getWorkingDirectory();
+  let fileList;
+  try {
+    const listResult = await executeTool('list_files', { path: cwd, recursive: true });
+    fileList = listResult;
+  } catch {
+    fileList = null;
+  }
+
   const rateLimiter = createRateLimiter();
   const messages = [
-    { role: 'system', content: buildSwarmPlanPrompt(task) },
+    { role: 'system', content: buildSwarmPlanPrompt(task, cwd, fileList) },
     { role: 'user', content: task },
   ];
 
@@ -583,6 +593,46 @@ async function runCodePhase(lead, workers, plan, context, originalTask, onStatus
     const solution = await runArchitectPhase(lead, plan, context, originalTask, onStatus, onText, isCancelled);
     if (!solution || isCancelled()) return;
 
+    // If architect bailed with INSUFFICIENT CONTEXT, fall back to lead with full tools
+    if (solution.includes('INSUFFICIENT CONTEXT')) {
+      if (onStatus) onStatus('phase-detail', lead.key, 'Architect had insufficient context — lead taking over with full tools...');
+      const conn = buildProviderConnection(lead.key);
+      if (!conn) return;
+      const rateLimiter = createRateLimiter();
+      const cwd = getWorkingDirectory();
+      const messages = [
+        { role: 'system', content: buildSystemPrompt(cwd, 'normal') },
+        { role: 'user', content: `${originalTask}\n\nNote: a previous attempt to plan this task couldn't find the relevant files. You need to explore the codebase yourself first, then implement the changes.` },
+      ];
+      let loopCount = 0;
+      const maxLoops = 20;
+      while (loopCount < maxLoops) {
+        if (isCancelled()) return;
+        loopCount++;
+        let responseText = '';
+        const assistantMsg = await callLLM(conn.url, conn.model, messages, conn.headers, conn.provider, {
+          onText: (text) => { responseText += text; if (onText) onText(text); },
+          onError: (err) => { if (onStatus) onStatus('error', lead.key, err); },
+          onThinking: () => {}, onToken: () => {},
+          rateLimiter, tools: toolDefinitions,
+        }, isCancelled);
+        if (!assistantMsg || isCancelled()) return;
+        messages.push(assistantMsg);
+        if (!assistantMsg.tool_calls || assistantMsg.tool_calls.length === 0) return;
+        for (const toolCall of assistantMsg.tool_calls) {
+          if (isCancelled()) return;
+          const fnName = toolCall.function.name;
+          let args = {};
+          try { args = JSON.parse(toolCall.function.arguments || '{}'); } catch {}
+          if (onToolCall) onToolCall(fnName, args, lead.key);
+          const result = await executeTool(fnName, args);
+          if (onToolResult) onToolResult(fnName, result, lead.key);
+          messages.push({ role: 'tool', tool_call_id: toolCall.id, content: result });
+        }
+      }
+      return;
+    }
+
     if (onStatus) onStatus('phase-detail', editorCandidate.key, 'Editor implementing...');
     await runEditorPhase(editorCandidate, solution, onStatus, null, onToolCall, onToolResult, isCancelled);
   } else {
@@ -831,7 +881,7 @@ export async function runSwarm(task, callbacks = {}, options = {}) {
     // Pick a reviewer — prefer one that wasn't heavily used in explore
     const reviewer = workers[workers.length - 1]; // last worker = likely least loaded
     if (onStatus) onStatus('phase', reviewer.key, 'REVIEW');
-    reviewResult = await runReviewPhase(reviewer, plan.review.description, mergedContext, onStatus, isCancelled);
+    reviewResult = await runReviewPhase(reviewer, plan.review.description, mergedContext || '(no exploration context)', onStatus, isCancelled);
     if (reviewResult && onStatus) onStatus('review-done', reviewer.key, reviewResult);
   }
 
