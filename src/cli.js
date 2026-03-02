@@ -8,7 +8,7 @@ import { setWorkingDirectory, getWorkingDirectory, setPlanMode, getPlanMode } fr
 import { loadConfig, saveConfig, getConfig, PROVIDERS } from './config.js';
 import { saveConversation, loadConversation, listConversations } from './conversation.js';
 import { getAllSkills, getSkill, saveSkill, deleteSkill, expandSkillPrompt, matchSkillCommand } from './skills.js';
-import { loadAllMemory, clearGlobalMemory, clearProjectMemory, getMemoryStats } from './memory.js';
+import { loadAllMemory, clearGlobalMemory, clearProjectMemory, getMemoryStats, loadHandoff, clearHandoff, parseHandoffTasks } from './memory.js';
 import { colors, formatToolCall, truncate, contextBar, formatDuration } from './utils.js';
 import { getSwarmPool, selectLead, runSwarm, excludeFromSwarm, includeInSwarm, classifyComplexity } from './swarm.js';
 
@@ -86,6 +86,16 @@ export async function startCLI() {
     console.log(`  ${chalk.green(m)}  ${t}`);
   }
   console.log(colors.dim('  Type /help for commands, /exit to quit\n'));
+
+  // Handoff detection at startup
+  const handoffContent = loadHandoff();
+  if (handoffContent) {
+    const tasks = parseHandoffTasks(handoffContent);
+    const pending = tasks.filter(t => !t.checked).length;
+    if (pending > 0) {
+      console.log(chalk.yellow(`  📋 ${pending} handoff task${pending !== 1 ? 's' : ''} pending — type /handoff to view\n`));
+    }
+  }
 
   const agent = createAgent();
   _agent = agent;
@@ -320,6 +330,15 @@ async function handleUserInput(input, rl, agent, opts = {}) {
         }
         const preview = result.split('\n').slice(0, 4).join('\n');
         console.log(colors.toolResult('  ' + truncate(preview, 300).replace(/\n/g, '\n  ')));
+        // Restart thinking spinner immediately to bridge gap until next LLM call
+        if (!thinkingSpinner) {
+          thinkingSpinner = ora({
+            text: buildThinkingText(),
+            indent: 2,
+            stream: process.stderr,
+            discardStdin: false,
+          }).start();
+        }
       },
       onError: (err) => {
         if (_aborted) return;
@@ -1137,6 +1156,104 @@ async function handleCommand(cmd, rl, agent, ask) {
       break;
     }
 
+    // ─── Handoff commands ────────────────────────────────────────
+
+    case '/handoff': {
+      const subParts = args.split(/\s+/);
+      const sub = subParts[0]?.toLowerCase() || 'show';
+
+      switch (sub) {
+        case 'show':
+        case 'view':
+        case '': {
+          const content = loadHandoff();
+          if (!content) {
+            console.log(colors.dim('  No handoff file found.'));
+            console.log(colors.dim('  Place a HANDOFF.md in .mantis/ to use this feature.\n'));
+            break;
+          }
+          const tasks = parseHandoffTasks(content);
+          console.log(colors.header('\n  Handoff Tasks'));
+          if (tasks.length === 0) {
+            console.log(colors.dim('  (no checkbox tasks found in handoff file)'));
+            console.log();
+            console.log('  ' + content.replace(/\n/g, '\n  '));
+          } else {
+            for (const t of tasks) {
+              if (t.checked) {
+                console.log(chalk.green(`  ✓ ${t.text}`));
+              } else {
+                console.log(chalk.yellow(`  ○ ${t.text}`));
+              }
+            }
+            const pending = tasks.filter(t => !t.checked).length;
+            const done = tasks.filter(t => t.checked).length;
+            console.log(colors.dim(`\n  ${done}/${tasks.length} complete, ${pending} remaining`));
+          }
+          console.log();
+          break;
+        }
+
+        case 'run': {
+          const content = loadHandoff();
+          if (!content) {
+            console.log(colors.error('  No handoff file found.\n'));
+            break;
+          }
+          const tasks = parseHandoffTasks(content);
+          const pending = tasks.filter(t => !t.checked).length;
+          if (pending === 0) {
+            console.log(colors.success('  All handoff tasks are already complete!\n'));
+            break;
+          }
+
+          console.log(colors.warning('\n  HANDOFF MODE'));
+          console.log(colors.dim(`  ${pending} task${pending !== 1 ? 's' : ''} to complete`));
+          console.log(colors.dim('  All tool calls will be auto-approved.'));
+          console.log(colors.dim('  Press Ctrl+C to interrupt at any time.\n'));
+
+          const handoffPrompt = `You have a handoff file at .mantis/HANDOFF.md with ${pending} pending tasks. ` +
+            `Work through each unchecked task (- [ ]) in order. For each task:\n` +
+            `1. Read any files mentioned in the task\n` +
+            `2. Make the required changes using edit_file\n` +
+            `3. After completing the change, update .mantis/HANDOFF.md to check off the task (change "- [ ]" to "- [x]")\n` +
+            `4. Move to the next task\n\n` +
+            `When all tasks are done, summarize what you changed.\n\n` +
+            `Start by reading .mantis/HANDOFF.md to see the full task list.`;
+
+          _autonomousMode = true;
+          await handleUserInput(handoffPrompt, rl, agent, { autonomous: true });
+          _autonomousMode = false;
+
+          console.log(colors.success('  Handoff mode complete.\n'));
+          break;
+        }
+
+        case 'clear': {
+          const content = loadHandoff();
+          if (!content) {
+            console.log(colors.dim('  No handoff file to clear.\n'));
+            break;
+          }
+          const confirm = await ask('Clear handoff file? (y/N)');
+          if (confirm.toLowerCase() === 'y') {
+            clearHandoff();
+            agent.refreshSystemPrompt();
+            console.log(colors.success('  Handoff file removed.\n'));
+          } else {
+            console.log(colors.dim('  Cancelled.\n'));
+          }
+          break;
+        }
+
+        default:
+          console.log(colors.error(`  Unknown handoff command: ${sub}`));
+          console.log(colors.dim('  Available: show, run, clear\n'));
+          break;
+      }
+      break;
+    }
+
     // ─── Skill commands ──────────────────────────────────────────
 
     case '/skill':
@@ -1460,6 +1577,12 @@ function printHelp() {
   ${colors.toolName('/memory clear <s>')}  Clear memory (project, global, or all)
   ${colors.dim('  Tell the model "save your state to memory" and it will persist')}
   ${colors.dim('  its context for future sessions.')}
+
+  ${colors.header('Handoff')}
+  ${colors.toolName('/handoff')}           Show handoff tasks from Claude Code
+  ${colors.toolName('/handoff run')}       Auto-run all pending handoff tasks
+  ${colors.toolName('/handoff clear')}     Remove the handoff file
+  ${colors.dim('  Place a .mantis/HANDOFF.md with checkbox tasks for Mantis to pick up.')}
 
   ${colors.header('Skills')}
   ${colors.toolName('/skills')}            List all available skills

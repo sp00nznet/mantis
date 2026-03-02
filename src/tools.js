@@ -8,6 +8,7 @@ import {
   saveGlobalMemory, saveProjectMemory,
   appendGlobalMemory, appendProjectMemory,
   clearGlobalMemory, clearProjectMemory,
+  clearHandoff,
   getMemoryPaths,
 } from './memory.js';
 
@@ -127,7 +128,7 @@ function writeFile({ path: filePath, content }) {
   return `File written: ${resolved} (${lineCount} lines, ${content.length} bytes)`;
 }
 
-function editFile({ path: filePath, old_string, new_string }) {
+function editFile({ path: filePath, old_string, new_string, replace_all }) {
   const resolved = resolvePath(filePath);
   if (!fs.existsSync(resolved)) {
     return `Error: File not found: ${resolved}`;
@@ -140,8 +141,16 @@ function editFile({ path: filePath, old_string, new_string }) {
     const preview = old_string.slice(0, 100);
     return `Error: old_string not found in ${resolved}.\nSearched for: "${preview}${old_string.length > 100 ? '...' : ''}"\nMake sure it matches exactly (including whitespace and indentation). Try reading the file first.`;
   }
+
+  if (replace_all) {
+    // Replace ALL occurrences — useful for renaming variables/classes across a file
+    const newContent = content.replaceAll(old_string, new_string);
+    fs.writeFileSync(resolved, newContent, 'utf-8');
+    return `File edited: ${resolved} (replaced ${occurrences} occurrence${occurrences > 1 ? 's' : ''}, ${newContent.split('\n').length} lines total)`;
+  }
+
   if (occurrences > 1) {
-    return `Error: old_string found ${occurrences} times in ${resolved}. It must be unique. Add more surrounding context to make it unique.`;
+    return `Error: old_string found ${occurrences} times in ${resolved}. It must be unique. Add more surrounding context to make it unique, or use replace_all=true to replace all occurrences.`;
   }
 
   const newContent = content.replace(old_string, new_string);
@@ -403,5 +412,9 @@ function deleteMemoryTool({ scope }) {
     const cleared = clearProjectMemory();
     return cleared ? 'Project memory cleared.' : 'No project memory to clear.';
   }
-  return 'Error: scope must be "project" or "global".';
+  if (scope === 'handoff') {
+    const cleared = clearHandoff();
+    return cleared ? 'Handoff file cleared.' : 'No handoff file to clear.';
+  }
+  return 'Error: scope must be "project", "global", or "handoff".';
 }

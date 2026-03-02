@@ -49,7 +49,7 @@ export const toolDefinitions = [
     type: "function",
     function: {
       name: "edit_file",
-      description: "Make a surgical edit to a file by replacing a specific string with a new string. The old_string must match exactly (including whitespace and indentation).",
+      description: "Make a surgical edit to a file by replacing a specific string with a new string. The old_string must match exactly (including whitespace and indentation). Set replace_all=true to replace ALL occurrences at once (useful for renaming variables, classes, etc).",
       parameters: {
         type: "object",
         properties: {
@@ -59,11 +59,15 @@ export const toolDefinitions = [
           },
           old_string: {
             type: "string",
-            description: "The exact string to find and replace. Must be unique in the file."
+            description: "The exact string to find and replace. Must be unique in the file unless replace_all is true."
           },
           new_string: {
             type: "string",
             description: "The string to replace old_string with"
+          },
+          replace_all: {
+            type: "boolean",
+            description: "If true, replace ALL occurrences of old_string in the file. Useful for renaming variables, functions, or classes across the entire file."
           }
         },
         required: ["path", "old_string", "new_string"]
@@ -213,8 +217,8 @@ export const toolDefinitions = [
         properties: {
           scope: {
             type: "string",
-            enum: ["project", "global"],
-            description: "Which memory to clear: 'project' or 'global'."
+            enum: ["project", "global", "handoff"],
+            description: "Which memory to clear: 'project', 'global', or 'handoff' (removes the handoff task file)."
           }
         },
         required: ["scope"]

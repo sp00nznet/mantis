@@ -24,6 +24,7 @@ const GLOBAL_MEMORY_DIR = path.join(os.homedir(), '.mantis', 'memory');
 const GLOBAL_MEMORY_FILE = path.join(GLOBAL_MEMORY_DIR, 'MEMORY.md');
 const PROJECT_MEMORY_DIRNAME = '.mantis';
 const PROJECT_MEMORY_FILENAME = 'MEMORY.md';
+const HANDOFF_FILENAME = 'HANDOFF.md';
 
 // ─── Read ────────────────────────────────────────────────────────────
 
@@ -63,9 +64,23 @@ export function loadAllMemory() {
  */
 export function buildMemoryBlock() {
   const { global, project } = loadAllMemory();
-  if (!global && !project) return '';
+  const handoff = loadHandoff();
+  if (!global && !project && !handoff) return '';
 
-  const parts = ['\n\n## Persistent Memory (from previous sessions)'];
+  const parts = [];
+
+  // Handoff block — highest priority, injected first
+  if (handoff) {
+    parts.push('\n\n## Handoff Tasks (from Claude Code)');
+    parts.push(handoff.trim());
+    parts.push('### Handoff Instructions');
+    parts.push('- Work through each unchecked `- [ ]` task in order.');
+    parts.push('- After completing a task, update the handoff file: change `- [ ]` to `- [x]` for that task using edit_file.');
+    parts.push('- Read the file before editing. Follow any notes at the bottom of the handoff.');
+    parts.push('- When all tasks are checked off, tell the user the handoff is complete.');
+  }
+
+  parts.push('\n\n## Persistent Memory (from previous sessions)');
 
   if (project) {
     parts.push('### Project Memory (.mantis/MEMORY.md)');
@@ -142,6 +157,63 @@ export function clearProjectMemory() {
     return true;
   }
   return false;
+}
+
+// ─── Handoff ─────────────────────────────────────────────────────
+
+export function getHandoffPath() {
+  return path.join(getWorkingDirectory(), PROJECT_MEMORY_DIRNAME, HANDOFF_FILENAME);
+}
+
+export function loadHandoff() {
+  const filepath = getHandoffPath();
+  if (fs.existsSync(filepath)) {
+    try {
+      return fs.readFileSync(filepath, 'utf-8');
+    } catch {
+      return '';
+    }
+  }
+  return '';
+}
+
+export function saveHandoff(content) {
+  const dir = path.join(getWorkingDirectory(), PROJECT_MEMORY_DIRNAME);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  const filepath = path.join(dir, HANDOFF_FILENAME);
+  fs.writeFileSync(filepath, content, 'utf-8');
+  return filepath;
+}
+
+export function clearHandoff() {
+  const filepath = getHandoffPath();
+  if (fs.existsSync(filepath)) {
+    fs.unlinkSync(filepath);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Parse handoff markdown and return array of { checked, text } task objects.
+ */
+export function parseHandoffTasks(content) {
+  if (!content) return [];
+  const tasks = [];
+  for (const line of content.split('\n')) {
+    const unchecked = line.match(/^- \[ \] (.+)$/);
+    if (unchecked) {
+      tasks.push({ checked: false, text: unchecked[1] });
+      continue;
+    }
+    const checked = line.match(/^- \[x\] (.+)$/i);
+    if (checked) {
+      tasks.push({ checked: true, text: checked[1] });
+    }
+  }
+  return tasks;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────

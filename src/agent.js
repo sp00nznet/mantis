@@ -352,6 +352,32 @@ export async function callLLM(url, model, messages, headers, provider, { onText,
       continue;
     }
 
+    // Handle 402 — Together AI uses this for spending rate caps (not actual billing failure)
+    if (response.status === 402 && attempt < maxRetries) {
+      let errBody = '';
+      try { errBody = await response.text(); } catch {}
+      // If user still has credits, this is a per-minute spend cap — retryable
+      if (errBody.includes('"credit_limit"') || errBody.includes('Credit limit exceeded')) {
+        const waitSec = 30;
+        if (onError) {
+          let remaining = waitSec;
+          onError(`Spending rate cap hit. Waiting ${remaining}s... (attempt ${attempt + 1}/${maxRetries})`);
+          const countdownInterval = setInterval(() => {
+            remaining--;
+            if (remaining > 0) {
+              process.stdout.write(`\r  Spending rate cap hit. Waiting ${remaining}s... (attempt ${attempt + 1}/${maxRetries})  `);
+            }
+          }, 1000);
+          await new Promise(r => setTimeout(r, waitSec * 1000));
+          clearInterval(countdownInterval);
+          process.stdout.write('\r  Retrying...                                           \n');
+        } else {
+          await new Promise(r => setTimeout(r, waitSec * 1000));
+        }
+        continue;
+      }
+    }
+
     if (!response.ok) {
       if (onThinking) onThinking(false);
       let text = '';
