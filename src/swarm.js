@@ -844,7 +844,7 @@ async function _runSwarmInner(task, callbacks, options, isCancelled) {
   if (onStatus) onStatus('phase', lead.key, 'PLAN');
   const plan = await decomposeTask(lead, task, onStatus, isCancelled);
 
-  if (_cancelled) return { success: false };
+  if (isCancelled()) return { success: false };
 
   if (!plan || !plan.explore || !plan.code) {
     if (onStatus) onStatus('error', lead.key, 'Could not decompose task — plan was empty or invalid');
@@ -862,7 +862,7 @@ async function _runSwarmInner(task, callbacks, options, isCancelled) {
   if (plan.explore.length > 0) {
     if (onStatus) onStatus('phase', null, 'EXPLORE');
     const exploreResults = await runParallelExplorers(plan.explore, workers, onStatus, isCancelled);
-    if (_cancelled) return { success: false };
+    if (isCancelled()) return { success: false };
 
     mergedContext = mergeExplorationResults(exploreResults);
 
@@ -879,7 +879,7 @@ async function _runSwarmInner(task, callbacks, options, isCancelled) {
   // Phase 3: Code Writing (architect/editor split, or fallback if exploration failed)
   if (onStatus) onStatus('phase', lead.key, 'CODE');
   await runCodePhase(lead, workers, plan, mergedContext, task, onStatus, onText, onToolCall, onToolResult, isCancelled);
-  if (_cancelled) return { success: false };
+  if (isCancelled()) return { success: false };
 
   // Phase 4: Review (optional, uses a different worker)
   let reviewResult = null;
