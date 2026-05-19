@@ -120,6 +120,27 @@
     opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 50; }
   #toast.show { opacity: 1; }
   #toast.err { background: #da3633; }
+
+  /* ── Directory picker modal ── */
+  .modal { position: fixed; inset: 0; background: rgba(1,4,9,.66);
+    display: flex; align-items: center; justify-content: center; z-index: 60; }
+  .modal-box { width: 560px; max-width: 92vw; max-height: 82vh; background: #161b22;
+    border: 1px solid #30363d; border-radius: 10px; display: flex; flex-direction: column;
+    overflow: hidden; }
+  .modal-head { display: flex; align-items: center; padding: 12px 16px;
+    border-bottom: 1px solid #21262d; }
+  .modal-head b { flex: 1; color: #c9d1d9; }
+  .modal-x { color: #8b949e; cursor: pointer; padding: 0 4px; }
+  .modal-x:hover { color: #f85149; }
+  .fs-path { padding: 9px 16px; color: #58a6ff; font-size: 12px;
+    border-bottom: 1px solid #21262d; word-break: break-all; }
+  .fs-list { flex: 1; overflow-y: auto; padding: 6px; min-height: 240px; }
+  .fs-item { padding: 7px 10px; border-radius: 6px; cursor: pointer; user-select: none; }
+  .fs-item:hover { background: #21262d; }
+  .fs-up { color: #8b949e; }
+  .fs-empty { padding: 18px; color: #6e7681; text-align: center; }
+  .modal-foot { display: flex; gap: 8px; align-items: center;
+    padding: 12px 16px; border-top: 1px solid #21262d; }
 </style>
 </head>
 <body>
@@ -200,7 +221,12 @@
         <h2>New session</h2>
         <div class="row">
           <div><label>Name</label><input id="newName" placeholder="my-session"></div>
-          <div><label>Working directory</label><input id="newCwd" placeholder="path"></div>
+          <div style="flex:2"><label>Working directory</label>
+            <div style="display:flex;gap:6px">
+              <input id="newCwd" placeholder="pick a folder →" style="flex:1">
+              <button type="button" class="alt" onclick="openPicker()">Browse…</button>
+            </div>
+          </div>
           <button onclick="createSession()">Create</button>
           <button class="alt" onclick="hideNewForm()">Cancel</button>
         </div>
@@ -212,6 +238,23 @@
   </main>
 </div>
 <div id="toast"></div>
+
+<div id="fsModal" class="modal" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <b>Select working directory</b>
+      <span class="modal-x" onclick="closePicker()">✕</span>
+    </div>
+    <div class="fs-path" id="fsPath">…</div>
+    <div class="fs-list" id="fsList"></div>
+    <div class="modal-foot">
+      <button class="alt" onclick="fsNewFolder()">＋ New folder</button>
+      <span style="flex:1"></span>
+      <button class="alt" onclick="closePicker()">Cancel</button>
+      <button onclick="fsChoose()">Use this folder</button>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
@@ -521,6 +564,64 @@ function deleteSession(id) {
     loadSessions();
   });
 }
+
+// ── Directory picker ──
+var FS_CUR = null; // path currently shown in the picker ('' = drive list)
+function openPicker() {
+  document.getElementById('fsModal').hidden = false;
+  var cur = document.getElementById('newCwd').value.trim();
+  fsNavigate(cur || null);
+}
+function closePicker() { document.getElementById('fsModal').hidden = true; }
+function fsNavigate(p) {
+  var url = '/api/fs/list';
+  if (p !== null && p !== undefined) url += '?path=' + encodeURIComponent(p);
+  fetch(url).then(function(r){ return r.json(); }).then(function(d){
+    if (d.error) { toast(d.error, true); if (p !== null) fsNavigate(null); return; }
+    FS_CUR = d.isDrives ? '' : d.path;
+    renderFs(d);
+  }).catch(function(){ toast('Could not list that folder', true); });
+}
+function renderFs(d) {
+  document.getElementById('fsPath').textContent = d.isDrives ? 'This PC — choose a drive' : d.path;
+  var list = document.getElementById('fsList');
+  list.innerHTML = '';
+  if (d.parent !== null && d.parent !== undefined) {
+    var up = el('div', { class: 'fs-item fs-up' });
+    up.textContent = '⬆  ..';
+    up.onclick = function(){ fsNavigate(d.parent); };
+    list.appendChild(up);
+  }
+  (d.dirs || []).forEach(function(e){
+    var it = el('div', { class: 'fs-item' });
+    it.textContent = (d.isDrives ? '💽  ' : '📁  ') + e.name;
+    it.onclick = function(){ fsNavigate(e.path); };
+    list.appendChild(it);
+  });
+  if (!(d.dirs || []).length) {
+    list.appendChild(el('div', { class: 'fs-empty' }, '(no subfolders)'));
+  }
+}
+function fsChoose() {
+  if (!FS_CUR) { toast('Open a drive or folder first', true); return; }
+  document.getElementById('newCwd').value = FS_CUR;
+  closePicker();
+}
+function fsNewFolder() {
+  if (!FS_CUR) { toast('Open a drive first', true); return; }
+  var name = prompt('New folder name (created inside ' + FS_CUR + '):');
+  if (!name) return;
+  api('POST','/api/fs/mkdir', { path: FS_CUR, name: name.trim() }).then(function(r){
+    if (r.ok) { toast('Folder created'); fsNavigate(r.path); }
+    else toast(r.error || 'Failed to create folder', true);
+  });
+}
+document.getElementById('fsModal').addEventListener('click', function(e){
+  if (e.target.id === 'fsModal') closePicker();
+});
+document.addEventListener('keydown', function(e){
+  if (e.key === 'Escape') closePicker();
+});
 
 // poll the session list while the Sessions view is open
 setInterval(function(){

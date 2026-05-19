@@ -11,6 +11,7 @@
 
 import http from 'http';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getConfig, saveConfig, PROVIDERS } from './config.js';
@@ -185,6 +186,78 @@ async function handleSessionApi(req, res, parts) {
   return sendJson(res, 404, { error: 'No such session route' });
 }
 
+// ─── Filesystem browser (directory picker) ──────────────────────────
+
+function listDrives() {
+  const drives = [];
+  for (let c = 65; c <= 90; c++) { // A..Z
+    const d = String.fromCharCode(c) + ':\\';
+    try { if (fs.existsSync(d)) drives.push(d); } catch { /* ignore */ }
+  }
+  return drives;
+}
+
+/**
+ * List subdirectories of a path.
+ * rawPath: null → default to the working dir · '' → Windows drive list / root.
+ */
+function handleFsList(res, rawPath) {
+  const isWin = process.platform === 'win32';
+
+  if (rawPath === '') {
+    if (isWin) {
+      return sendJson(res, 200, {
+        path: '', isDrives: true, parent: null, home: os.homedir(),
+        dirs: listDrives().map(d => ({ name: d, path: d })),
+      });
+    }
+    rawPath = '/';
+  }
+
+  let dir;
+  try { dir = path.resolve(rawPath || getWorkingDirectory()); }
+  catch { dir = getWorkingDirectory(); }
+
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (err) {
+    return sendJson(res, 400, { error: `Cannot open ${dir}: ${err.code || err.message}` });
+  }
+
+  const dirs = entries
+    .filter(e => { try { return e.isDirectory(); } catch { return false; } })
+    .map(e => e.name)
+    .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
+    .slice(0, 1000)
+    .map(name => ({ name, path: path.join(dir, name) }));
+
+  // '' as a parent means "go up to the Windows drive list".
+  const root = path.parse(dir).root;
+  const parent = dir === root ? (isWin ? '' : null) : path.dirname(dir);
+
+  sendJson(res, 200, { path: dir, parent, isDrives: false, home: os.homedir(), dirs });
+}
+
+async function handleFsMkdir(req, res) {
+  const body = await readJson(req);
+  const base = body.path;
+  const name = (body.name || '').trim();
+  if (!base || !name) return sendJson(res, 400, { error: 'path and name are required' });
+  if (/[\\/:*?"<>|]/.test(name)) {
+    return sendJson(res, 400, { error: 'Folder name has invalid characters' });
+  }
+  const target = path.join(base, name);
+  try {
+    fs.mkdirSync(target);
+    return sendJson(res, 200, { ok: true, path: target });
+  } catch (err) {
+    return sendJson(res, 400, {
+      error: err.code === 'EEXIST' ? 'That folder already exists' : err.message,
+    });
+  }
+}
+
 // ─── Config API ─────────────────────────────────────────────────────
 
 async function handleApi(req, res, url) {
@@ -193,6 +266,16 @@ async function handleApi(req, res, url) {
 
   if (parts[1] === 'sessions') {
     return handleSessionApi(req, res, parts);
+  }
+
+  if (parts[1] === 'fs') {
+    if (parts[2] === 'list' && req.method === 'GET') {
+      return handleFsList(res, new URL(req.url, 'http://x').searchParams.get('path'));
+    }
+    if (parts[2] === 'mkdir' && req.method === 'POST') {
+      return handleFsMkdir(req, res);
+    }
+    return sendJson(res, 404, { error: 'No such fs route' });
   }
 
   if (url === '/api/state' && req.method === 'GET') {
