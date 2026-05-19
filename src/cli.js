@@ -815,9 +815,14 @@ async function handleCommand(cmd, rl, agent, ask) {
         }
 
         case 'key': {
-          const keyParts = subArgs.split(/\s+/);
+          const keyParts = subArgs.split(/\s+/).filter(Boolean);
           const keyProvider = keyParts[0]?.toLowerCase();
-          const keyValue = keyParts.slice(1).join(' ').trim();
+          // API keys are a single whitespace-free token. If the user typed
+          // extra words (e.g. "/provider key nvidia build nvapi-..."), take the
+          // last token as the key and warn about the rest — pasting a stray
+          // word into the key is a silent way to get 401s.
+          const keyTokens = keyParts.slice(1);
+          const keyValue = keyTokens[keyTokens.length - 1] || '';
           if (!keyProvider || !keyValue) {
             console.log(colors.error('  Usage: /provider key <provider> <apikey>\n'));
             break;
@@ -826,10 +831,14 @@ async function handleCommand(cmd, rl, agent, ask) {
             console.log(colors.error(`  Unknown provider: ${keyProvider}\n`));
             break;
           }
+          if (keyTokens.length > 1) {
+            console.log(colors.warning(`  Ignored extra text before the key: "${keyTokens.slice(0, -1).join(' ')}"`));
+          }
           const config = getConfig();
           const keys = { ...config.providerKeys, [keyProvider]: keyValue };
           saveConfig({ providerKeys: keys });
-          console.log(colors.success(`  API key saved for ${keyProvider}.\n`));
+          console.log(colors.success(`  API key saved for ${keyProvider}.`));
+          console.log(colors.dim('  Run /provider test to verify it works.\n'));
           break;
         }
 
