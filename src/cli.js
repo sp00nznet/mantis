@@ -20,6 +20,8 @@ let _cancelResolve = null; // resolves the cancel promise to win the race
 let _autoApprove = false;  // when true, skip confirmation prompts for tool calls
 let _rl = null;            // readline interface ref for confirmation prompts
 let _autonomousMode = false; // when true, running in autonomous mode
+let _proxyServer = null;   // running proxy server instance, if any
+let _adminServer = null;   // running admin server instance, if any
 
 // Process-level SIGINT fallback.
 // In raw mode, Ctrl+C produces byte 0x03 which readline handles (rl.on('SIGINT')).
@@ -1355,6 +1357,96 @@ async function handleCommand(cmd, rl, agent, ask) {
       break;
     }
 
+    // ─── Proxy server ────────────────────────────────────────────
+
+    case '/proxy': {
+      const sub = args.trim().toLowerCase();
+      if (sub === 'stop') {
+        if (_proxyServer) {
+          _proxyServer.close();
+          _proxyServer = null;
+          console.log(colors.success('  Proxy stopped.\n'));
+        } else {
+          console.log(colors.dim('  Proxy is not running.\n'));
+        }
+        break;
+      }
+      if (_proxyServer) {
+        console.log(colors.dim('  Proxy is already running. Use /proxy stop to stop it.\n'));
+        break;
+      }
+      try {
+        const { startProxy } = await import('./proxy.js');
+        _proxyServer = await startProxy();
+        const pc = getConfig().proxy;
+        console.log(colors.success(`\n  Proxy running — set ANTHROPIC_BASE_URL=http://${pc.host}:${pc.port}`));
+        console.log(colors.dim('  Admin UI mounted at /admin. Use /proxy stop to stop it.\n'));
+      } catch (err) {
+        console.log(colors.error(`  Failed to start proxy: ${err.message}\n`));
+      }
+      break;
+    }
+
+    // ─── Admin web UI ────────────────────────────────────────────
+
+    case '/admin': {
+      const sub = args.trim().toLowerCase();
+      if (sub === 'stop') {
+        if (_adminServer) {
+          _adminServer.close();
+          _adminServer = null;
+          console.log(colors.success('  Admin UI stopped.\n'));
+        } else {
+          console.log(colors.dim('  Admin UI is not running.\n'));
+        }
+        break;
+      }
+      if (_adminServer) {
+        console.log(colors.dim('  Admin UI is already running. Use /admin stop to stop it.\n'));
+        break;
+      }
+      try {
+        const { startAdmin } = await import('./admin.js');
+        _adminServer = await startAdmin();
+        const ac = getConfig().admin;
+        console.log(colors.success(`\n  Admin UI: http://${ac.host}:${ac.port}/admin\n`));
+      } catch (err) {
+        console.log(colors.error(`  Failed to start admin UI: ${err.message}\n`));
+      }
+      break;
+    }
+
+    // ─── Chat bots ───────────────────────────────────────────────
+
+    case '/bot': {
+      const which = args.trim().toLowerCase().split(/\s+/)[0];
+      if (which !== 'telegram' && which !== 'discord') {
+        console.log(colors.error('  Usage: /bot <telegram|discord>'));
+        console.log(colors.dim('  Set the bot token first via the admin UI (/admin).\n'));
+        break;
+      }
+      const token = getConfig().bots?.[which]?.token;
+      if (!token) {
+        console.log(colors.error(`  No ${which} token configured.`));
+        console.log(colors.dim('  Set it in the admin UI (/admin), then try again.\n'));
+        break;
+      }
+      console.log(colors.warning(`\n  Starting ${which} bot — its logs appear inline. Exit Mantis to stop it.`));
+      console.log(colors.dim('  Tip: run it in its own terminal with `mantis bot ' + which + '` for cleaner output.\n'));
+      try {
+        if (which === 'telegram') {
+          const { startTelegramBot } = await import('./bots/telegram.js');
+          startTelegramBot(); // long-running — do not await
+        } else {
+          const { startDiscordBot } = await import('./bots/discord.js');
+          startDiscordBot();
+        }
+      } catch (err) {
+        console.log(colors.error(`  Failed to start ${which} bot: ${err.message}\n`));
+      }
+      break;
+    }
+
     // ─── Default: check for skill match ──────────────────────────
     default: {
       const match = matchSkillCommand(cmd);
@@ -1570,6 +1662,15 @@ function printHelp() {
   ${colors.toolName('/swarm remove <p>')}  Exclude a provider from the pool
   ${colors.toolName('/swarm add <p>')}     Re-include an excluded provider
   ${colors.dim('  Example: /swarm refactor the auth module')}
+
+  ${colors.header('Proxy & Remote Access')}
+  ${colors.toolName('/proxy')}             Start the Anthropic-compatible proxy server
+  ${colors.toolName('/proxy stop')}        Stop the proxy server
+  ${colors.toolName('/admin')}             Start the admin web UI (manage providers/keys)
+  ${colors.toolName('/bot telegram')}      Start the Telegram bot
+  ${colors.toolName('/bot discord')}       Start the Discord bot
+  ${colors.dim('  The proxy lets real Claude Code / VS Code / JetBrains use Mantis')}
+  ${colors.dim('  providers — point them at ANTHROPIC_BASE_URL=http://127.0.0.1:8787')}
 
   ${colors.header('Memory')}
   ${colors.toolName('/memory')}            Show saved memory (project + global)

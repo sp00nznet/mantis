@@ -134,6 +134,41 @@ export const PROVIDERS = {
     defaultModel: 'command-a-03-2025',
     description: 'Command A — enterprise-grade with free trial',
   },
+  nvidia: {
+    name: 'NVIDIA NIM',
+    baseUrl: 'https://integrate.api.nvidia.com/v1',
+    requiresKey: true,
+    defaultModel: 'qwen/qwen3-coder-480b-a35b-instruct',
+    description: 'NVIDIA-hosted models — FREE API key from build.nvidia.com',
+  },
+  kimi: {
+    name: 'Kimi (Moonshot)',
+    baseUrl: 'https://api.moonshot.ai/v1',
+    requiresKey: true,
+    defaultModel: 'kimi-k2.6',
+    description: 'Moonshot Kimi K2.6 — strong agentic coding model',
+  },
+  zai: {
+    name: 'Z.ai (GLM)',
+    baseUrl: 'https://api.z.ai/api/paas/v4',
+    requiresKey: true,
+    defaultModel: 'glm-4.6',
+    description: 'GLM-4.6 — OpenAI-compatible, cheap coding plan',
+  },
+  lmstudio: {
+    name: 'LM Studio (local)',
+    baseUrl: 'http://localhost:1234/v1',
+    requiresKey: false,
+    defaultModel: 'local-model',
+    description: 'Local LM Studio server — set the loaded model with /model',
+  },
+  llamacpp: {
+    name: 'llama.cpp (local)',
+    baseUrl: 'http://localhost:8080/v1',
+    requiresKey: false,
+    defaultModel: 'local-model',
+    description: 'Local llama.cpp server (llama-server) — no API key needed',
+  },
 };
 
 const DEFAULTS = {
@@ -154,6 +189,30 @@ const DEFAULTS = {
     bestOfN: 0,               // 0 = off, 2-3 = send code tasks to N providers, pick best
     providerModels: {},       // override default models per provider: { groq: 'llama-3.3-70b', local: 'qwen2.5-coder:14b' }
   },
+  // Anthropic-compatible proxy — lets real Claude Code / VS Code / JetBrains
+  // route through Mantis's provider pool. See `mantis serve`.
+  proxy: {
+    port: 8787,
+    host: '127.0.0.1',
+    answerProbes: true,       // short-circuit trivial Claude Code probes locally
+    // Claude model tier → { provider, model }. null = fall back to active provider.
+    routes: {
+      opus:    { provider: null, model: null },
+      sonnet:  { provider: null, model: null },
+      haiku:   { provider: null, model: null },
+      default: { provider: null, model: null },
+    },
+  },
+  // Remote coding via chat bots. See `mantis bot telegram` / `mantis bot discord`.
+  bots: {
+    telegram: { token: '', allowedUsers: [] },  // allowedUsers: numeric chat IDs ([] = allow all)
+    discord:  { token: '', allowedUsers: [] },  // allowedUsers: user IDs ([] = allow all)
+  },
+  // Local admin web UI. See `mantis admin`.
+  admin: {
+    port: 8788,
+    host: '127.0.0.1',
+  },
 };
 
 let config = { ...DEFAULTS };
@@ -165,6 +224,14 @@ export function loadConfig() {
     try {
       const saved = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
       config = { ...DEFAULTS, ...saved };
+      // Deep-merge nested config objects so new default keys survive an old
+      // config.json that predates them (shallow spread would drop them).
+      for (const k of ['swarm', 'proxy', 'bots', 'admin']) {
+        config[k] = { ...DEFAULTS[k], ...(saved[k] || {}) };
+      }
+      config.proxy.routes = { ...DEFAULTS.proxy.routes, ...(saved.proxy?.routes || {}) };
+      config.bots.telegram = { ...DEFAULTS.bots.telegram, ...(saved.bots?.telegram || {}) };
+      config.bots.discord = { ...DEFAULTS.bots.discord, ...(saved.bots?.discord || {}) };
     } catch {
       // Corrupted config, use defaults
     }
@@ -184,6 +251,33 @@ export function getConfig() {
 
 export function getConfigDir() {
   return CONFIG_DIR;
+}
+
+/**
+ * Build request connection details for a provider — shared by the proxy,
+ * bots, and admin UI. Returns { url, headers, model, provider } or null.
+ * @param {string} providerKey - key into PROVIDERS
+ * @param {string} [modelOverride] - explicit model; falls back to active/default
+ */
+export function buildConnection(providerKey, modelOverride) {
+  const provider = PROVIDERS[providerKey];
+  if (!provider) return null;
+
+  const headers = { 'Content-Type': 'application/json' };
+  let url;
+  if (providerKey === 'local') {
+    url = `${config.ollamaUrl.replace(/\/+$/, '')}/v1/chat/completions`;
+  } else {
+    url = `${provider.baseUrl.replace(/\/+$/, '')}/chat/completions`;
+    const apiKey = config.providerKeys?.[providerKey];
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+
+  const model = modelOverride
+    || (providerKey === config.provider ? config.model : null)
+    || provider.defaultModel;
+
+  return { url, headers, model, provider };
 }
 
 export function getConversationsDir() {

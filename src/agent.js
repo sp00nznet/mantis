@@ -3,6 +3,7 @@ import { buildSystemPrompt } from './prompt.js';
 import { executeTool, getWorkingDirectory, getPlanMode } from './tools.js';
 import { getConfig, PROVIDERS } from './config.js';
 import { shouldCompact, compactMessages, countContextTokens, getContextStats } from './context.js';
+import { classifyHttpError } from './errors.js';
 
 // ─── Per-Provider Rate Limiter ──────────────────────────────────────
 // Tracks request timestamps to enforce RPM/RPD limits from provider config.
@@ -301,88 +302,37 @@ export async function callLLM(url, model, messages, headers, provider, { onText,
       return null;
     }
 
-    // Handle 429 — distinguish quota exhaustion from temporary rate limits
-    if (response.status === 429 && attempt < maxRetries) {
+    // Non-OK response — classify it (see errors.js), retry transient
+    // failures with a countdown, bail immediately on quota/auth/etc.
+    if (!response.ok) {
       let errBody = '';
       try { errBody = await response.text(); } catch {}
+      const cls = classifyHttpError(response.status, errBody, response.headers);
 
-      // Quota exhaustion is NOT retryable — don't waste time waiting.
-      // Be precise: "billing" appears in URLs of retryable errors too (e.g. Groq's
-      // TPM rate limit includes console.groq.com/settings/billing in the message).
-      // Only match actual quota/billing error codes, not URLs containing "billing".
-      const isQuotaError = errBody.includes('"insufficient_quota"') ||
-        errBody.includes('"exceeded your current quota"') ||
-        errBody.includes('"plan_limit"') ||
-        errBody.includes('"budget_exceeded"');
-      if (isQuotaError) {
-        if (onThinking) onThinking(false);
-        onError(`Quota exceeded for this provider. Check your plan and billing.\n${errBody}`);
-        return null;
-      }
-
-      let waitSec = 5;
-      // Check Retry-After header first (standard HTTP)
-      const retryAfter = response.headers.get('retry-after');
-      if (retryAfter && /^\d+$/.test(retryAfter.trim())) {
-        waitSec = parseInt(retryAfter.trim(), 10);
-      } else {
-        // Match: "retryDelay": "40s", "retry in 40.2s", "try again in 3s"
-        const match = errBody.match(/(?:retry(?:Delay|[-_ ]?after)?["' :]*(in\s*)?|try again in\s*)([\d.]+)\s*s?/i);
-        if (match) waitSec = Math.ceil(parseFloat(match[2]));
-      }
-      waitSec = Math.max(waitSec, 1);  // at least 1s
-      waitSec = Math.min(waitSec, 120); // cap at 2 min
-      // Countdown timer so user knows how long to wait
-      if (onError) {
-        let remaining = waitSec;
-        onError(`Rate limited. Waiting ${remaining}s... (attempt ${attempt + 1}/${maxRetries})`);
-        const countdownInterval = setInterval(() => {
-          remaining--;
-          if (remaining > 0) {
-            // Overwrite previous line with updated countdown
-            process.stdout.write(`\r  Rate limited. Waiting ${remaining}s... (attempt ${attempt + 1}/${maxRetries})  `);
-          }
-        }, 1000);
-        await new Promise(r => setTimeout(r, waitSec * 1000));
-        clearInterval(countdownInterval);
-        process.stdout.write('\r  Retrying...                                           \n');
-      } else {
-        await new Promise(r => setTimeout(r, waitSec * 1000));
-      }
-      continue;
-    }
-
-    // Handle 402 — Together AI uses this for spending rate caps (not actual billing failure)
-    if (response.status === 402 && attempt < maxRetries) {
-      let errBody = '';
-      try { errBody = await response.text(); } catch {}
-      // If user still has credits, this is a per-minute spend cap — retryable
-      if (errBody.includes('"credit_limit"') || errBody.includes('Credit limit exceeded')) {
-        const waitSec = 30;
+      if (cls.retryable && attempt < maxRetries) {
+        const waitSec = Math.max(1, Math.round(cls.waitMs / 1000));
         if (onError) {
           let remaining = waitSec;
-          onError(`Spending rate cap hit. Waiting ${remaining}s... (attempt ${attempt + 1}/${maxRetries})`);
+          onError(`${cls.message} — waiting ${remaining}s (attempt ${attempt + 1}/${maxRetries})`);
           const countdownInterval = setInterval(() => {
             remaining--;
             if (remaining > 0) {
-              process.stdout.write(`\r  Spending rate cap hit. Waiting ${remaining}s... (attempt ${attempt + 1}/${maxRetries})  `);
+              // Overwrite previous line with updated countdown
+              process.stdout.write(`\r  ${cls.message} — waiting ${remaining}s (attempt ${attempt + 1}/${maxRetries})  `);
             }
           }, 1000);
           await new Promise(r => setTimeout(r, waitSec * 1000));
           clearInterval(countdownInterval);
           process.stdout.write('\r  Retrying...                                           \n');
         } else {
-          await new Promise(r => setTimeout(r, waitSec * 1000));
+          await new Promise(r => setTimeout(r, cls.waitMs));
         }
         continue;
       }
-    }
 
-    if (!response.ok) {
+      // Not retryable, or out of retries — surface the error and stop.
       if (onThinking) onThinking(false);
-      let text = '';
-      try { text = await response.text(); } catch {}
-      onError(`LLM API error (${response.status}): ${text}`);
+      onError(`${cls.message} (HTTP ${response.status})\n${errBody.slice(0, 600)}`);
       return null;
     }
 

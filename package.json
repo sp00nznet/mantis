@@ -1,7 +1,7 @@
 {
   "name": "mantis-code",
-  "version": "2.0.0",
-  "description": "Agentic coding CLI — local or cloud LLMs, autonomous mode, GPU-tiered installs",
+  "version": "3.0.0",
+  "description": "Agentic coding CLI — local or cloud LLMs, autonomous & swarm modes, Anthropic-compatible proxy, chat bots",
   "bin": {
     "mantis": "./bin/mantis.js"
   },

@@ -59,11 +59,11 @@ Mantis is intentionally simple — about 800 lines of JavaScript, no frameworks,
           │      Any OpenAI-Compatible       │
           │           Endpoint               │
           │                                  │
-          │  Local:    Ollama (localhost)     │
+          │  Local:    Ollama, LM Studio,     │
+          │            llama.cpp              │
           │  Cloud:    OpenAI, Claude,        │
-          │            Gemini, Groq,          │
-          │            Cerebras, Mistral,     │
-          │            + 10 more providers    │
+          │            Gemini, Groq, NVIDIA,  │
+          │            + 14 more providers    │
           └──────────────────────────────────┘
 ```
 
@@ -113,7 +113,8 @@ It also:
 - Caps at 25 iterations per turn as a safety measure
 
 ### `src/tools.js` — The Hands
-Seven tool implementations that actually interact with the filesystem:
+Ten tool implementations — seven that interact with the filesystem and three for
+persistent memory:
 
 Each tool follows the same pattern:
 1. Resolve the path (relative to working directory)
@@ -159,16 +160,49 @@ Key functions:
 The CLI calls `matchSkillCommand()` in its default case — so any `/unknown` command is checked against skills before showing an error.
 
 ### `src/config.js` — The Settings
-Manages `~/.mantis/config.json` with defaults, load, and save. Also contains the `PROVIDERS` registry — a constant object mapping 17 provider keys to their base URLs, default models, and auth requirements. Adding a new provider is as simple as adding an entry to this object.
+Manages `~/.mantis/config.json` with defaults, load, and save. Also contains the `PROVIDERS` registry — a constant object mapping 22 provider keys to their base URLs, default models, and auth requirements. Adding a new provider is as simple as adding an entry to this object. Exports `buildConnection()`, the shared URL/header/model resolver used by the proxy, bots, and admin UI.
 
 ### `src/utils.js` — The Paintbrush
 Chalk color definitions, tool call formatting, text truncation, duration formatting, context bar rendering.
 
 ---
 
+## v3.0 Modules — Swarm, Proxy, Bots
+
+These modules layer on top of the core agent without changing it.
+
+### `src/swarm.js` — Multi-Provider Orchestration
+Runs a task across every configured provider in parallel: PLAN → EXPLORE →
+ARCHITECT → EDITOR → REVIEW. See [Swarm Mode](swarm.md).
+
+### `src/proxy.js` — Anthropic-Compatible Proxy
+An `http` server that speaks the Anthropic Messages API, translates to/from the
+OpenAI format, and tier-routes to providers. Lets real Claude Code run on
+Mantis. See [Proxy](proxy.md).
+
+### `src/probes.js` — Trivial-Probe Short-Circuit
+Detects throwaway client probes (connectivity checks, quota pings) so the proxy
+can answer them locally instead of spending provider quota.
+
+### `src/errors.js` — Error Classification
+`classifyHttpError()` turns a provider's HTTP status + body into a single
+`{ kind, retryable, waitMs, message }` verdict. Used by both `agent.js` (retry
+with backoff) and `proxy.js` (translate to Anthropic error shapes).
+
+### `src/admin.js` — Admin Web UI
+A loopback-only control panel for keys, providers, routing, and bot tokens.
+Standalone via `mantis admin`, or mounted on the proxy at `/admin`.
+
+### `src/bot-core.js` + `src/bots/` — Chat Bots
+`bot-core.js` drives an agent session for a chat; `bots/telegram.js`
+(long-polling) and `bots/discord.js` (gateway WebSocket) are the platform
+adapters. See [Chat Bots](bots.md).
+
+---
+
 ## The API Layer
 
-Mantis talks to any OpenAI-compatible `POST /v1/chat/completions` endpoint. The provider registry in `config.js` defines 17 providers, each with a base URL, default model, and auth requirements.
+Mantis talks to any OpenAI-compatible `POST /v1/chat/completions` endpoint. The provider registry in `config.js` defines 22 providers, each with a base URL, default model, and auth requirements.
 
 ### How provider switching works
 
@@ -179,7 +213,8 @@ config.js: PROVIDERS = {
   gemini:   { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/', ... },
   groq:     { baseUrl: 'https://api.groq.com/openai/v1', ... },
   cerebras: { baseUrl: 'https://api.cerebras.ai/v1', ... },
-  ...17 total
+  nvidia:   { baseUrl: 'https://integrate.api.nvidia.com/v1', ... },
+  ...22 total
 }
 ```
 
@@ -208,7 +243,7 @@ data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"read","
 data: [DONE]
 ```
 
-The streaming parser in `agent.js` reassembles these fragments into complete messages. This format is the same across all 17 providers — that's the power of the OpenAI-compatible standard.
+The streaming parser in `agent.js` reassembles these fragments into complete messages. This format is the same across all 22 providers — that's the power of the OpenAI-compatible standard.
 
 ---
 

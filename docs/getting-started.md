@@ -125,10 +125,11 @@ mantis
 | **Google Gemini** | [aistudio.google.com](https://aistudio.google.com) | 1M tokens/day |
 | **Groq** | [console.groq.com](https://console.groq.com) | 1,000 req/day on large models |
 | **Cerebras** | [cloud.cerebras.ai](https://cloud.cerebras.ai) | Free tier, fastest inference |
+| **NVIDIA NIM** | [build.nvidia.com](https://build.nvidia.com) | Free key, GPU-accelerated |
 | **Mistral** | [console.mistral.ai](https://console.mistral.ai) | 1B tokens/month |
 | **xAI (Grok)** | [console.x.ai](https://console.x.ai) | $25 free credits |
 
-See [Configuration — Providers](configuration.md#providers) for all 17 providers.
+See [Providers](providers.md) for all 22 providers.
 
 ---
 
@@ -204,6 +205,9 @@ The `/commit` skill stages, writes a commit message, and commits — all automat
 ## What's Next
 
 - Try the built-in [Skills](skills.md) — `/commit`, `/test`, `/review`, `/explain`, and more
+- Run [Swarm Mode](swarm.md) to put every provider to work in parallel
+- Use Mantis as a [proxy](proxy.md) for the real Claude Code, VS Code, or JetBrains
+- Drive Mantis from [Telegram or Discord](bots.md)
 - Learn about [Plan Mode](plan-mode.md) for exploring before making changes
 - See all [Tools](tools.md) the model can use
 - Understand [Context Management](context-management.md) for long sessions
