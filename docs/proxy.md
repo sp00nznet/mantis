@@ -127,15 +127,39 @@ It's also mounted on the proxy — when `mantis serve` is running, open
 `http://127.0.0.1:8787/admin`. From the REPL, `/admin` starts the standalone
 server.
 
-The panel lets you:
+The panel has a left-nav layout with four sections:
 
-- set the **active provider** and model
-- add / clear **API keys** for any provider, with a one-click connection **test**
-- configure **proxy tier routing** and the probe toggle
-- set **Telegram / Discord bot tokens**
+- **Providers** — set the active provider/model; add, **test**, or **delete**
+  API keys for any provider
+- **Proxy** — tier routing and the probe toggle
+- **Bots** — Telegram / Discord tokens
+- **Sessions** — live agent terminals (see below)
 
 Access is restricted to `localhost` — requests from any other address get a
 `403`.
+
+### Sessions tab
+
+The Sessions tab runs Mantis agents **inside the browser**, rendered in real
+xterm.js terminals:
+
+- **+ New** spawns a fresh agent session in a directory you choose. Type a
+  message, press Enter, and it works the task with all tools enabled
+  (auto-approved, like autonomous mode).
+- **Grid view** shows every session's terminal at once — handy for watching
+  several agents in parallel.
+- Each session has its own conversation; delete one with the ✕ on its chip.
+
+### Sharing a REPL session — `/remote`
+
+Run `/remote` inside an interactive Mantis session to expose it to the admin
+panel. It starts the admin server (if needed) and registers the live REPL as a
+session — the browser can **watch its output stream and send it input**. Stop
+sharing with `/remote stop`.
+
+> Sessions share one process and one working directory. Running sessions in
+> different directories at the same time can race on the cwd — keep concurrent
+> sessions in the same project, or run them one at a time.
 
 ---
 

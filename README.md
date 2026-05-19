@@ -75,7 +75,7 @@ mantis bot discord       # run the Discord bot
   VS Code, and JetBrains run on your provider pool. See [docs/proxy.md](docs/proxy.md).
 - **Chat bots** — drive Mantis from Telegram or Discord. See [docs/bots.md](docs/bots.md).
 - **Admin web UI** — `mantis admin` to manage keys, providers, and routing in a
-  browser instead of editing config.
+  browser — plus a Sessions tab that runs live agents in xterm.js terminals.
 - **Plan mode** — `/plan` to explore and design without touching anything.
 - **Context management** — long conversations auto-compact instead of crashing.
 - **Persistent memory** — "save state to memory" persists notes across sessions.
@@ -102,7 +102,8 @@ mantis bot discord       # run the Discord bot
 | `/auto <task>` | Run a task autonomously |
 | `/swarm <task>` | Use all configured providers in parallel ([docs](docs/swarm.md)) |
 | `/proxy [stop]` | Start/stop the Anthropic-compatible proxy ([docs](docs/proxy.md)) |
-| `/admin` | Start the admin web UI |
+| `/admin` | Start the admin web UI (providers, proxy, live sessions) |
+| `/remote [stop]` | Share this REPL session to the admin panel ([docs](docs/proxy.md#sharing-a-repl-session--remote)) |
 | `/bot <telegram\|discord>` | Start a chat bot ([docs](docs/bots.md)) |
 | `/memory` | Show saved memory |
 | `/skills` · `/<skillname>` | List / run skills (e.g. `/commit`, `/test`) |

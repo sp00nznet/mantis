@@ -22,6 +22,7 @@ let _rl = null;            // readline interface ref for confirmation prompts
 let _autonomousMode = false; // when true, running in autonomous mode
 let _proxyServer = null;   // running proxy server instance, if any
 let _adminServer = null;   // running admin server instance, if any
+let _remoteSession = null; // hub session mirroring this REPL, if /remote is on
 
 // Process-level SIGINT fallback.
 // In raw mode, Ctrl+C produces byte 0x03 which readline handles (rl.on('SIGINT')).
@@ -202,6 +203,13 @@ async function handleUserInput(input, rl, agent, opts = {}) {
   _isBusy = true;
   _aborted = false;
 
+  // Mirror this turn to the admin panel if /remote is active.
+  if (_remoteSession) {
+    _remoteSession.setStatus('running');
+    const echo = input.length > 200 ? input.slice(0, 200) + '…' : input;
+    _remoteSession.write('\n\x1b[1;34m❯ ' + echo + '\x1b[0m\n');
+  }
+
   const isAutonomous = opts.autonomous || false;
   const maxLoops = isAutonomous ? 100 : 25;
 
@@ -264,6 +272,7 @@ async function handleUserInput(input, rl, agent, opts = {}) {
       },
       onText: (text) => {
         if (_aborted) return;
+        if (_remoteSession) _remoteSession.write(text);
         // If no spinners are active, stream text directly to stdout
         if (!thinkingSpinner && !spinner) {
           if (!hasOutput) {
@@ -295,6 +304,7 @@ async function handleUserInput(input, rl, agent, opts = {}) {
           hasOutput = false;
         }
         console.log('\n  ' + formatToolCall(name, args));
+        if (_remoteSession) _remoteSession.write('\n' + formatToolCall(name, args) + '\n');
 
         if (_autoApprove) return true;
 
@@ -332,6 +342,7 @@ async function handleUserInput(input, rl, agent, opts = {}) {
         }
         const preview = result.split('\n').slice(0, 4).join('\n');
         console.log(colors.toolResult('  ' + truncate(preview, 300).replace(/\n/g, '\n  ')));
+        if (_remoteSession) _remoteSession.write(colors.dim(truncate(preview, 300)) + '\n');
         // Restart thinking spinner immediately to bridge gap until next LLM call
         if (!thinkingSpinner) {
           thinkingSpinner = ora({
@@ -347,6 +358,7 @@ async function handleUserInput(input, rl, agent, opts = {}) {
         if (thinkingSpinner) { thinkingSpinner.stop(); thinkingSpinner = null; }
         if (spinner) { spinner.fail('Error'); spinner = null; }
         console.log('\n  ' + colors.error(err));
+        if (_remoteSession) _remoteSession.write('\n' + colors.error(err) + '\n');
       },
       onCompact: (before, after) => {
         if (_aborted) return;
@@ -386,6 +398,7 @@ async function handleUserInput(input, rl, agent, opts = {}) {
   process.stderr.write('\x1B[?25h');
 
   _cancelResolve = null;
+  if (_remoteSession) _remoteSession.setStatus('idle');
 
   if (_aborted) {
     _aborted = false;
@@ -1456,6 +1469,60 @@ async function handleCommand(cmd, rl, agent, ask) {
       break;
     }
 
+    // ─── Remote session sharing ──────────────────────────────────
+
+    case '/remote': {
+      const sub = args.trim().toLowerCase();
+      if (sub === 'stop') {
+        if (_remoteSession) {
+          const { removeSession } = await import('./sessions.js');
+          removeSession(_remoteSession.id);
+          _remoteSession = null;
+          console.log(colors.success('  This session is no longer shared.\n'));
+        } else {
+          console.log(colors.dim('  This session is not being shared.\n'));
+        }
+        break;
+      }
+      if (_remoteSession) {
+        const ac = getConfig().admin;
+        console.log(colors.dim(`  Already shared — open http://${ac.host}:${ac.port}/admin (Sessions tab).\n`));
+        break;
+      }
+      try {
+        if (!_adminServer) {
+          const { startAdmin } = await import('./admin.js');
+          _adminServer = await startAdmin();
+        }
+        const { attachSession } = await import('./sessions.js');
+        _remoteSession = attachSession({
+          name: 'cli-' + (getWorkingDirectory().split(/[/\\]/).filter(Boolean).pop() || 'session'),
+          cwd: getWorkingDirectory(),
+          agent,
+          origin: 'cli',
+          driver: {
+            input: (text) => {
+              if (_isBusy) {
+                _remoteSession?.write('\n[REPL is busy — try again when it is idle]\n');
+                return;
+              }
+              console.log(colors.dim('\n  [remote] ') + text);
+              handleUserInput(text, rl, agent);
+            },
+            stop: () => agent.cancel(),
+          },
+        });
+        _remoteSession.write(colors.green('  This REPL session is now live in the admin panel.\n\n'));
+        const ac = getConfig().admin;
+        console.log(colors.success('\n  Session shared to the admin panel.'));
+        console.log(colors.dim(`  Open http://${ac.host}:${ac.port}/admin and pick the Sessions tab.`));
+        console.log(colors.dim('  The web user can watch and send input. Use /remote stop to end sharing.\n'));
+      } catch (err) {
+        console.log(colors.error(`  Failed to share session: ${err.message}\n`));
+      }
+      break;
+    }
+
     // ─── Default: check for skill match ──────────────────────────
     default: {
       const match = matchSkillCommand(cmd);
@@ -1675,11 +1742,14 @@ function printHelp() {
   ${colors.header('Proxy & Remote Access')}
   ${colors.toolName('/proxy')}             Start the Anthropic-compatible proxy server
   ${colors.toolName('/proxy stop')}        Stop the proxy server
-  ${colors.toolName('/admin')}             Start the admin web UI (manage providers/keys)
+  ${colors.toolName('/admin')}             Start the admin web UI (providers, proxy, sessions)
+  ${colors.toolName('/remote')}            Share this REPL session to the admin panel
+  ${colors.toolName('/remote stop')}       Stop sharing this session
   ${colors.toolName('/bot telegram')}      Start the Telegram bot
   ${colors.toolName('/bot discord')}       Start the Discord bot
   ${colors.dim('  The proxy lets real Claude Code / VS Code / JetBrains use Mantis')}
   ${colors.dim('  providers — point them at ANTHROPIC_BASE_URL=http://127.0.0.1:8787')}
+  ${colors.dim('  The admin Sessions tab runs live agents in the browser via xterm.js')}
 
   ${colors.header('Memory')}
   ${colors.toolName('/memory')}            Show saved memory (project + global)

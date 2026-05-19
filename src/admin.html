@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mantis Admin</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: #0d1117; color: #c9d1d9; height: 100vh; overflow: hidden;
+  }
+  #app { display: flex; height: 100vh; }
+
+  /* ── Sidebar ── */
+  #sidebar {
+    width: 212px; flex: 0 0 212px; background: #0a0e14;
+    border-right: 1px solid #21262d; display: flex; flex-direction: column;
+  }
+  .brand { padding: 18px 20px; font-size: 16px; font-weight: 700; color: #3fb950; }
+  .brand small { display: block; color: #6e7681; font-size: 11px; font-weight: 400; }
+  nav { padding: 8px; flex: 1; }
+  nav a {
+    display: flex; align-items: center; gap: 8px; padding: 9px 12px; margin: 2px 0;
+    border-radius: 6px; color: #8b949e; cursor: pointer; user-select: none;
+    border-left: 2px solid transparent; font-size: 13px;
+  }
+  nav a:hover { background: #161b22; color: #c9d1d9; }
+  nav a.active { background: #161b22; color: #c9d1d9; border-left-color: #3fb950; }
+  nav a .count { margin-left: auto; background: #21262d; color: #8b949e;
+    font-size: 10px; padding: 1px 7px; border-radius: 9px; }
+  .side-foot { padding: 14px 20px; border-top: 1px solid #21262d;
+    font-size: 11px; color: #6e7681; }
+  .side-foot .dot { color: #3fb950; }
+  .side-foot .dot.off { color: #6e7681; }
+
+  /* ── Main ── */
+  main { flex: 1; overflow-y: auto; padding: 24px 28px; }
+  main.no-pad { padding: 0; }
+  .view { display: none; }
+  .view.active { display: block; }
+  .view-head { display: flex; align-items: center; margin-bottom: 18px; }
+  .view-head h1 { font-size: 18px; color: #c9d1d9; font-weight: 600; }
+  .view-head .spacer { flex: 1; }
+
+  section.card {
+    background: #161b22; border: 1px solid #21262d; border-radius: 8px;
+    padding: 16px 18px; margin-bottom: 16px;
+  }
+  section.card h2 { font-size: 13px; color: #58a6ff; margin-bottom: 12px; font-weight: 600; }
+
+  label { display: block; color: #8b949e; margin: 8px 0 4px; font-size: 11px; }
+  input, select, textarea {
+    width: 100%; padding: 7px 9px; background: #0d1117; border: 1px solid #30363d;
+    border-radius: 6px; color: #c9d1d9; font-family: inherit; font-size: 13px;
+  }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: #58a6ff; }
+  textarea { resize: vertical; }
+
+  button {
+    padding: 7px 13px; background: #238636; border: 1px solid #2ea043;
+    border-radius: 6px; color: #fff; font-family: inherit; font-size: 12px;
+    cursor: pointer; white-space: nowrap;
+  }
+  button:hover { background: #2ea043; }
+  button.alt { background: #21262d; border-color: #30363d; color: #c9d1d9; }
+  button.alt:hover { background: #30363d; }
+  button.danger { background: #21262d; border-color: #f85149; color: #f85149; }
+  button.danger:hover { background: #f85149; color: #fff; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+
+  .row { display: flex; gap: 10px; align-items: flex-end; }
+  .row > * { flex: 1; }
+  .row > button { flex: 0 0 auto; }
+
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 7px 6px; border-bottom: 1px solid #21262d; vertical-align: middle; }
+  td:first-child { white-space: nowrap; }
+  .tag { font-size: 10px; padding: 1px 7px; border-radius: 10px; }
+  .tag.on { background: #238636; color: #fff; }
+  .tag.off { background: #30363d; color: #8b949e; }
+  .grid3 { display: grid; grid-template-columns: 70px 1fr 1fr; gap: 8px 10px; align-items: center; }
+  .grid3 label { margin: 0; }
+  .hint { color: #6e7681; font-size: 11px; margin-top: 8px; }
+  .check { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+  .check input { width: auto; }
+
+  /* ── Sessions ── */
+  #sessChips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .chip {
+    display: flex; align-items: center; gap: 8px; padding: 7px 11px;
+    background: #161b22; border: 1px solid #21262d; border-radius: 7px; cursor: pointer;
+  }
+  .chip:hover { border-color: #30363d; }
+  .chip.sel { border-color: #3fb950; background: #1c2430; }
+  .chip .sdot { width: 8px; height: 8px; border-radius: 50%; background: #6e7681; }
+  .chip .sdot.running { background: #3fb950; box-shadow: 0 0 6px #3fb950; }
+  .chip .x { color: #6e7681; padding: 0 2px; }
+  .chip .x:hover { color: #f85149; }
+  .chip .meta { color: #6e7681; font-size: 11px; }
+
+  .term-wrap { background: #0a0e14; border: 1px solid #21262d; border-radius: 8px;
+    overflow: hidden; }
+  .term-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    border-bottom: 1px solid #21262d; color: #8b949e; font-size: 12px; }
+  .term-host { height: 56vh; padding: 6px 8px; }
+  .term-host.mini { height: 200px; }
+  .input-row { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #21262d; }
+  .input-row textarea { height: 38px; max-height: 140px; }
+
+  #sessGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 14px; }
+  .empty { color: #6e7681; padding: 40px; text-align: center; border: 1px dashed #21262d;
+    border-radius: 8px; }
+
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: #238636; color: #fff; padding: 9px 18px; border-radius: 6px;
+    opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 50; }
+  #toast.show { opacity: 1; }
+  #toast.err { background: #da3633; }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand">🦗 Mantis<small>admin panel</small></div>
+    <nav>
+      <a data-view="providers" class="active">Providers</a>
+      <a data-view="proxy">Proxy</a>
+      <a data-view="bots">Bots</a>
+      <a data-view="sessions">Sessions <span class="count" id="navSessCount">0</span></a>
+    </nav>
+    <div class="side-foot" id="sideFoot">connecting…</div>
+  </aside>
+
+  <main id="main">
+    <!-- ── Providers ── -->
+    <div class="view active" id="view-providers">
+      <div class="view-head"><h1>Providers</h1></div>
+      <section class="card">
+        <h2>Active provider</h2>
+        <div class="row">
+          <div><label>Provider</label><select id="activeProvider"></select></div>
+          <div><label>Model</label><input id="activeModel" placeholder="model id"></div>
+          <button onclick="saveActive()">Save</button>
+        </div>
+      </section>
+      <section class="card">
+        <h2>API keys</h2>
+        <table id="keyTable"></table>
+        <div class="hint">Stored in ~/.mantis/config.json. "Delete" clears a saved key.</div>
+      </section>
+    </div>
+
+    <!-- ── Proxy ── -->
+    <div class="view" id="view-proxy">
+      <div class="view-head"><h1>Proxy routing</h1></div>
+      <section class="card">
+        <h2>Claude tier → provider</h2>
+        <div class="hint" style="margin-bottom:12px">Leave provider blank to use the active provider; leave model blank for that provider's default.</div>
+        <div class="grid3" id="routeGrid"></div>
+        <div class="check">
+          <input type="checkbox" id="answerProbes">
+          <label for="answerProbes" style="margin:0">Answer trivial Claude Code probes locally</label>
+        </div>
+        <div class="row" style="margin-top:14px">
+          <div><label>Proxy port</label><input id="proxyPort" type="number"></div>
+          <div><label>Proxy host</label><input id="proxyHost"></div>
+          <button onclick="saveProxy()">Save</button>
+        </div>
+        <div class="hint">Port/host changes apply next time the proxy starts.</div>
+      </section>
+    </div>
+
+    <!-- ── Bots ── -->
+    <div class="view" id="view-bots">
+      <div class="view-head"><h1>Chat bots</h1></div>
+      <section class="card">
+        <h2>Tokens</h2>
+        <label>Telegram bot token</label>
+        <input id="telegramToken" type="password" placeholder="(not set)">
+        <label>Discord bot token</label>
+        <input id="discordToken" type="password" placeholder="(not set)">
+        <div class="row" style="margin-top:14px"><div></div><button onclick="saveBots()">Save</button></div>
+        <div class="hint">Start a bot with: mantis bot telegram &nbsp;/&nbsp; mantis bot discord</div>
+      </section>
+    </div>
+
+    <!-- ── Sessions ── -->
+    <div class="view" id="view-sessions">
+      <div class="view-head">
+        <h1>Sessions</h1>
+        <div class="spacer"></div>
+        <button class="alt" id="gridBtn" onclick="toggleGrid()" style="margin-right:8px">▦ Grid</button>
+        <button onclick="showNewForm()">+ New</button>
+      </div>
+      <section class="card" id="newForm" hidden>
+        <h2>New session</h2>
+        <div class="row">
+          <div><label>Name</label><input id="newName" placeholder="my-session"></div>
+          <div><label>Working directory</label><input id="newCwd" placeholder="path"></div>
+          <button onclick="createSession()">Create</button>
+          <button class="alt" onclick="hideNewForm()">Cancel</button>
+        </div>
+      </section>
+      <div id="sessChips"></div>
+      <div id="sessSingle"></div>
+      <div id="sessGrid" hidden></div>
+    </div>
+  </main>
+</div>
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<script>
+"use strict";
+var STATE = null, SESSIONS = [], SEL = null, GRID = false;
+var TERMS = {};            // id -> { term, fit, es }
+var TIERS = ['opus','sonnet','haiku','default'];
+var XTERM_THEME = {
+  background: '#0a0e14', foreground: '#c9d1d9', cursor: '#3fb950',
+  black: '#484f58', red: '#f85149', green: '#3fb950', yellow: '#d29922',
+  blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#c9d1d9',
+  brightBlack: '#6e7681'
+};
+
+function toast(msg, err) {
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'show' + (err ? ' err' : '');
+  setTimeout(function(){ t.className = ''; }, 2400);
+}
+function api(method, path, body) {
+  var o = { method: method, headers: { 'Content-Type': 'application/json' } };
+  if (body) o.body = JSON.stringify(body);
+  return fetch(path, o).then(function(r){ return r.json().catch(function(){ return {}; }); });
+}
+function el(tag, attrs, html) {
+  var e = document.createElement(tag);
+  if (attrs) for (var k in attrs) e.setAttribute(k, attrs[k]);
+  if (html != null) e.innerHTML = html;
+  return e;
+}
+
+// ── Navigation ──
+document.querySelectorAll('nav a').forEach(function(a){
+  a.onclick = function(){ showView(a.dataset.view); };
+});
+function showView(name) {
+  document.querySelectorAll('nav a').forEach(function(a){
+    a.classList.toggle('active', a.dataset.view === name);
+  });
+  document.querySelectorAll('.view').forEach(function(v){
+    v.classList.toggle('active', v.id === 'view-' + name);
+  });
+  document.getElementById('main').classList.toggle('no-pad', false);
+  if (name === 'sessions') { loadSessions(); }
+}
+
+// ── Providers / Proxy / Bots ──
+function providerOptions(sel, blank) {
+  var h = blank ? '<option value="">(active provider)</option>' : '';
+  STATE.providers.forEach(function(p){
+    h += '<option value="' + p.key + '"' + (p.key === sel ? ' selected' : '') + '>' + p.name + '</option>';
+  });
+  return h;
+}
+function renderConfig() {
+  document.getElementById('activeProvider').innerHTML = providerOptions(STATE.activeProvider, false);
+  document.getElementById('activeModel').value = STATE.activeModel || '';
+
+  var rows = '';
+  STATE.providers.forEach(function(p){
+    if (!p.requiresKey) return;
+    var tag = p.hasKey ? '<span class="tag on">key set</span>' : '<span class="tag off">no key</span>';
+    rows += '<tr><td>' + p.name + '</td><td>' + tag + '</td>' +
+      '<td><input type="password" id="key_' + p.key + '" placeholder="' +
+        (p.hasKey ? 'set — type to replace' : 'paste API key') + '"></td>' +
+      '<td style="text-align:right;white-space:nowrap">' +
+        '<button class="alt" onclick="testProvider(\'' + p.key + '\')">Test</button> ' +
+        '<button onclick="saveKey(\'' + p.key + '\')">Save</button> ' +
+        '<button class="danger" onclick="delKey(\'' + p.key + '\')">Delete</button>' +
+      '</td></tr>';
+  });
+  document.getElementById('keyTable').innerHTML = rows;
+
+  var grid = '<label></label><label>Provider</label><label>Model</label>';
+  TIERS.forEach(function(t){
+    var r = (STATE.proxy.routes || {})[t] || {};
+    grid += '<label style="text-transform:capitalize">' + t + '</label>' +
+      '<select id="route_' + t + '_p">' + providerOptions(r.provider, true) + '</select>' +
+      '<input id="route_' + t + '_m" placeholder="(default)" value="' + (r.model || '') + '">';
+  });
+  document.getElementById('routeGrid').innerHTML = grid;
+  document.getElementById('answerProbes').checked = STATE.proxy.answerProbes;
+  document.getElementById('proxyPort').value = STATE.proxy.port;
+  document.getElementById('proxyHost').value = STATE.proxy.host;
+  document.getElementById('telegramToken').placeholder = STATE.bots.telegram.hasToken ? 'set — type to replace' : '(not set)';
+  document.getElementById('discordToken').placeholder = STATE.bots.discord.hasToken ? 'set — type to replace' : '(not set)';
+
+  document.getElementById('sideFoot').innerHTML =
+    '<span class="dot">●</span> ' + STATE.activeProvider + '<br>' +
+    '<span class="dot">●</span> proxy :' + STATE.proxy.port;
+}
+function loadState() { return api('GET','/api/state').then(function(s){ STATE = s; renderConfig(); }); }
+
+function saveActive() {
+  api('POST','/api/provider/active', {
+    provider: document.getElementById('activeProvider').value,
+    model: document.getElementById('activeModel').value
+  }).then(function(r){ done(r, 'Active provider saved'); });
+}
+function saveKey(k) {
+  api('POST','/api/provider/key', { provider:k, key:document.getElementById('key_'+k).value })
+    .then(function(r){ done(r, 'Key saved for ' + k); });
+}
+function delKey(k) {
+  if (!confirm('Delete the saved API key for ' + k + '?')) return;
+  api('POST','/api/provider/key', { provider:k, key:'' }).then(function(r){ done(r, 'Key deleted for ' + k); });
+}
+function testProvider(k) {
+  toast('Testing ' + k + '…');
+  api('GET','/api/provider/test?provider=' + encodeURIComponent(k)).then(function(r){ toast(r.message, !r.ok); });
+}
+function saveProxy() {
+  var routes = {};
+  TIERS.forEach(function(t){
+    routes[t] = { provider: document.getElementById('route_'+t+'_p').value,
+                  model: document.getElementById('route_'+t+'_m').value };
+  });
+  api('POST','/api/proxy', {
+    routes: routes,
+    answerProbes: document.getElementById('answerProbes').checked,
+    port: parseInt(document.getElementById('proxyPort').value, 10),
+    host: document.getElementById('proxyHost').value
+  }).then(function(r){ done(r, 'Proxy settings saved'); });
+}
+function saveBots() {
+  var p = {};
+  var tg = document.getElementById('telegramToken').value;
+  var dc = document.getElementById('discordToken').value;
+  if (tg) p.telegramToken = tg;
+  if (dc) p.discordToken = dc;
+  api('POST','/api/bots', p).then(function(r){ done(r, 'Bot tokens saved'); });
+}
+function done(r, msg) {
+  if (r && r.ok) { toast(msg); loadState(); }
+  else toast((r && r.error) || 'Failed', true);
+}
+
+// ── Sessions ──
+function loadSessions() {
+  return api('GET','/api/sessions').then(function(list){
+    SESSIONS = list || [];
+    document.getElementById('navSessCount').textContent = SESSIONS.length;
+    if (SEL && !SESSIONS.some(function(s){ return s.id === SEL; })) SEL = null;
+    if (!SEL && SESSIONS.length) SEL = SESSIONS[0].id;
+    renderSessions();
+  });
+}
+function renderSessions() {
+  var chips = document.getElementById('sessChips');
+  chips.innerHTML = '';
+  SESSIONS.forEach(function(s){
+    var chip = el('div', { class: 'chip' + (s.id === SEL ? ' sel' : '') });
+    chip.innerHTML =
+      '<span class="sdot ' + s.status + '"></span>' +
+      '<span>' + s.name + '</span>' +
+      '<span class="meta">' + s.origin + ' · ' + s.contextPct + '%</span>' +
+      '<span class="x" title="delete">✕</span>';
+    chip.onclick = function(ev){
+      if (ev.target.classList.contains('x')) { deleteSession(s.id); return; }
+      SEL = s.id; renderSessions();
+    };
+    chips.appendChild(chip);
+  });
+
+  var single = document.getElementById('sessSingle');
+  var grid = document.getElementById('sessGrid');
+  // tear down terminals no longer shown
+  Object.keys(TERMS).forEach(function(id){
+    var live = SESSIONS.some(function(s){ return s.id === id; });
+    var shown = GRID ? live : (id === SEL);
+    if (!live || !shown) closeTerm(id);
+  });
+
+  if (GRID) {
+    single.hidden = true; grid.hidden = false; grid.innerHTML = '';
+    if (!SESSIONS.length) { grid.innerHTML = '<div class="empty">No sessions yet.</div>'; return; }
+    SESSIONS.forEach(function(s){ grid.appendChild(buildTerminal(s, true)); });
+  } else {
+    grid.hidden = true; single.hidden = false; single.innerHTML = '';
+    var sel = SESSIONS.filter(function(s){ return s.id === SEL; })[0];
+    if (!sel) {
+      single.innerHTML = '<div class="empty">No session selected. Click "+ New" to start one.</div>';
+      return;
+    }
+    single.appendChild(buildTerminal(sel, false));
+  }
+}
+function buildTerminal(s, mini) {
+  var wrap = el('div', { class: 'term-wrap' });
+  var head = el('div', { class: 'term-head' });
+  head.innerHTML = '<span class="sdot ' + s.status + '"></span><b>' + s.name + '</b>' +
+    '<span style="color:#6e7681">· ' + s.cwd + '</span>';
+  var spacer = el('span'); spacer.style.flex = '1'; head.appendChild(spacer);
+  if (mini) {
+    var openBtn = el('button', { class: 'alt' }, 'Open');
+    openBtn.onclick = function(){ GRID = false; SEL = s.id; document.getElementById('gridBtn').classList.remove('active'); renderSessions(); };
+    head.appendChild(openBtn);
+  } else {
+    var stopBtn = el('button', { class: 'alt' }, 'Stop');
+    stopBtn.onclick = function(){ api('POST','/api/sessions/'+s.id+'/stop'); };
+    head.appendChild(stopBtn);
+  }
+  wrap.appendChild(head);
+
+  var host = el('div', { class: 'term-host' + (mini ? ' mini' : '') });
+  wrap.appendChild(host);
+
+  if (!mini) {
+    var ir = el('div', { class: 'input-row' });
+    var ta = el('textarea', { placeholder: 'Message this session — Enter to send, Shift+Enter for newline' });
+    var send = el('button', null, 'Send');
+    function fire() {
+      var v = ta.value.trim();
+      if (!v) return;
+      api('POST','/api/sessions/'+s.id+'/input', { text: v });
+      ta.value = '';
+    }
+    send.onclick = fire;
+    ta.onkeydown = function(e){ if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fire(); } };
+    ir.appendChild(ta); ir.appendChild(send);
+    wrap.appendChild(ir);
+  }
+
+  // defer xterm creation until the element is in the DOM
+  setTimeout(function(){ openTerm(s.id, host); }, 0);
+  return wrap;
+}
+function openTerm(id, host) {
+  if (TERMS[id]) closeTerm(id);
+  if (!window.Terminal) { host.innerHTML = '<div class="empty">xterm.js failed to load (offline?).</div>'; return; }
+  var term = new Terminal({
+    convertEol: false, fontSize: 12, cursorBlink: false, disableStdin: true,
+    scrollback: 5000, theme: XTERM_THEME,
+    fontFamily: 'ui-monospace, Menlo, Consolas, monospace'
+  });
+  var fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(host);
+  try { fit.fit(); } catch (e) {}
+  var es = new EventSource('/api/sessions/' + id + '/stream');
+  es.onmessage = function(ev){
+    var f; try { f = JSON.parse(ev.data); } catch (e) { return; }
+    if (f.type === 'write') term.write(f.text);
+    else if (f.type === 'status') {
+      var s = SESSIONS.filter(function(x){ return x.id === id; })[0];
+      if (s && s.status !== f.status) { s.status = f.status; renderChipDots(); }
+    }
+  };
+  es.onerror = function(){ /* auto-reconnects */ };
+  TERMS[id] = { term: term, fit: fit, es: es };
+}
+function closeTerm(id) {
+  var t = TERMS[id];
+  if (!t) return;
+  try { t.es.close(); } catch (e) {}
+  try { t.term.dispose(); } catch (e) {}
+  delete TERMS[id];
+}
+function renderChipDots() {
+  document.getElementById('navSessCount').textContent = SESSIONS.length;
+  var chips = document.querySelectorAll('#sessChips .chip');
+  // simplest: re-render chips only
+  var chipsEl = document.getElementById('sessChips');
+  if (chipsEl) {
+    Array.prototype.forEach.call(chips, function(c, i){
+      var s = SESSIONS[i]; if (!s) return;
+      var dot = c.querySelector('.sdot');
+      if (dot) dot.className = 'sdot ' + s.status;
+    });
+  }
+}
+function refitAll() {
+  Object.keys(TERMS).forEach(function(id){
+    try { TERMS[id].fit.fit(); } catch (e) {}
+  });
+}
+window.addEventListener('resize', refitAll);
+
+function toggleGrid() {
+  GRID = !GRID;
+  document.getElementById('gridBtn').classList.toggle('active', GRID);
+  renderSessions();
+}
+function showNewForm() {
+  var f = document.getElementById('newForm');
+  f.hidden = false;
+  document.getElementById('newName').value = '';
+  document.getElementById('newCwd').value = (STATE && STATE.cwd) || '';
+  document.getElementById('newName').focus();
+}
+function hideNewForm() { document.getElementById('newForm').hidden = true; }
+function createSession() {
+  api('POST','/api/sessions', {
+    name: document.getElementById('newName').value.trim(),
+    cwd: document.getElementById('newCwd').value.trim()
+  }).then(function(r){
+    if (r && r.id) { hideNewForm(); SEL = r.id; toast('Session created'); loadSessions(); }
+    else toast((r && r.error) || 'Failed to create session', true);
+  });
+}
+function deleteSession(id) {
+  if (!confirm('Delete this session?')) return;
+  api('POST','/api/sessions/' + id + '/delete').then(function(){
+    closeTerm(id);
+    if (SEL === id) SEL = null;
+    loadSessions();
+  });
+}
+
+// poll the session list while the Sessions view is open
+setInterval(function(){
+  if (document.getElementById('view-sessions').classList.contains('active')) {
+    api('GET','/api/sessions').then(function(list){
+      SESSIONS = list || [];
+      document.getElementById('navSessCount').textContent = SESSIONS.length;
+      renderChipDots();
+    });
+  }
+}, 3000);
+
+loadState();
+</script>
+</body>
+</html>
