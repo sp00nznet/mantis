@@ -6,76 +6,101 @@ import { shouldCompact, compactMessages, countContextTokens, getContextStats } f
 import { classifyHttpError } from './errors.js';
 
 // ─── Per-Provider Rate Limiter ──────────────────────────────────────
-// Tracks request timestamps to enforce RPM/RPD limits from provider config.
+// Enforces RPM/RPD limits from provider config AND adaptively backs off when
+// the provider returns 429s — many free tiers throttle on tokens-per-minute,
+// not request count, so a fixed RPM can't catch every case. The adaptive
+// penalty self-tunes: it grows on each 429 and decays on each clean success.
 // Factory: each call returns an independent limiter instance (used by swarm workers).
 export function createRateLimiter() {
   return {
-    timestamps: [],  // recent request timestamps
+    timestamps: [],     // recent request timestamps (rolling 60s window)
     dailyCount: 0,
-    dailyResetAt: 0, // epoch ms when daily count resets
+    dailyResetAt: 0,    // epoch ms when daily count resets
+    lastRequestAt: 0,   // epoch ms of the most recent request
+    adaptiveDelayMs: 0, // extra spacing accrued from recent 429s (self-tuning)
+
+    // Called when the provider returns a 429 — slow future requests down.
+    penalize() {
+      this.adaptiveDelayMs = Math.min((this.adaptiveDelayMs || 0) + 5000, 30000);
+    },
+
+    // Called after a clean success — gradually relax the adaptive spacing.
+    reward() {
+      if (this.adaptiveDelayMs > 0) {
+        this.adaptiveDelayMs = Math.max(0, this.adaptiveDelayMs - 2000);
+      }
+    },
+
+    // Wait `waitMs`, showing a live countdown when a status callback exists.
+    async _wait(waitMs, reason, onWait) {
+      if (waitMs <= 0) return;
+      const waitSec = Math.ceil(waitMs / 1000);
+      if (onWait && waitSec >= 2) {
+        onWait(`${reason} — waiting ${waitSec}s`);
+        let remaining = waitSec;
+        const interval = setInterval(() => {
+          remaining--;
+          if (remaining > 0) process.stdout.write(`\r  ${reason} — ${remaining}s        `);
+        }, 1000);
+        await new Promise(r => setTimeout(r, waitMs));
+        clearInterval(interval);
+        process.stdout.write('\r                                                              \r');
+      } else {
+        await new Promise(r => setTimeout(r, waitMs));
+      }
+    },
 
     async throttle(provider, providerKey, onWait) {
       const rl = provider.rateLimit;
-      if (!rl) return; // no rate limit configured
-
       const now = Date.now();
+      const windowMs = 60_000;
 
-      // Reset daily counter at midnight
-      if (now > this.dailyResetAt) {
-        this.dailyCount = 0;
-        const tomorrow = new Date();
-        tomorrow.setHours(24, 0, 0, 0);
-        this.dailyResetAt = tomorrow.getTime();
-      }
-
-      // Check daily limit
-      if (rl.rpd && this.dailyCount >= rl.rpd) {
-        if (onWait) onWait(`Daily limit reached (${rl.rpd} requests/day for ${provider.name} free tier). Try again tomorrow or switch providers.`);
-        // Don't block forever — just warn and let the API reject
-      }
-
-      // Enforce RPM — wait if we've sent too many requests in the last 60s
-      if (rl.rpm) {
-        const windowMs = 60_000;
-        const minInterval = Math.ceil(windowMs / rl.rpm); // e.g. 5 RPM = 12000ms between requests
-        this.timestamps = this.timestamps.filter(t => now - t < windowMs);
-
-        if (this.timestamps.length >= rl.rpm) {
-          // Window is full — wait until the oldest request falls out
-          const waitUntil = this.timestamps[0] + windowMs;
-          const waitMs = waitUntil - now;
-          if (waitMs > 0) {
-            const waitSec = Math.ceil(waitMs / 1000);
-            if (onWait) onWait(`Throttling to ${rl.rpm} RPM (${provider.name} free tier). Waiting ${waitSec}s...`);
-            // Countdown
-            let remaining = waitSec;
-            const interval = setInterval(() => {
-              remaining--;
-              if (remaining > 0) {
-                process.stdout.write(`\r  Throttling: ${remaining}s...           `);
-              }
-            }, 1000);
-            await new Promise(r => setTimeout(r, waitMs));
-            clearInterval(interval);
-            process.stdout.write('\r                                    \r');
-          }
-        } else if (this.timestamps.length > 0) {
-          // Enforce minimum spacing between requests
-          const lastReq = this.timestamps[this.timestamps.length - 1];
-          const elapsed = now - lastReq;
-          if (elapsed < minInterval) {
-            const waitMs = minInterval - elapsed;
-            await new Promise(r => setTimeout(r, waitMs));
-          }
+      // ─ Daily limit (rpd) ─
+      if (rl?.rpd) {
+        if (now > this.dailyResetAt) {
+          this.dailyCount = 0;
+          const tomorrow = new Date();
+          tomorrow.setHours(24, 0, 0, 0);
+          this.dailyResetAt = tomorrow.getTime();
+        }
+        if (this.dailyCount >= rl.rpd && onWait) {
+          onWait(`Daily limit reached (${rl.rpd} requests/day for ${provider.name} free tier). Try again tomorrow or switch providers.`);
         }
       }
 
-      this.timestamps.push(Date.now());
-      this.dailyCount++;
+      // ─ RPM window-full check — wait for the oldest request to age out ─
+      const minInterval = rl?.rpm ? Math.ceil(windowMs / rl.rpm) : 0;
+      if (rl?.rpm) {
+        this.timestamps = this.timestamps.filter(t => now - t < windowMs);
+        if (this.timestamps.length >= rl.rpm) {
+          const waitMs = this.timestamps[0] + windowMs - Date.now();
+          await this._wait(waitMs, `Throttling to ${rl.rpm} RPM (${provider.name} free tier)`, onWait);
+        }
+      }
 
-      // Warn when approaching daily limit
-      if (rl.rpd && this.dailyCount >= rl.rpd - 3 && this.dailyCount < rl.rpd) {
-        if (onWait) onWait(`${rl.rpd - this.dailyCount} requests remaining today (${provider.name} free tier)`);
+      // ─ Request spacing: the larger of the configured RPM interval and the
+      //   adaptive penalty. The penalty is what actually keeps the agent loop
+      //   under a provider's real (often undocumented, token-based) limit. ─
+      const effectiveInterval = Math.max(minInterval, this.adaptiveDelayMs || 0);
+      if (effectiveInterval > 0 && this.lastRequestAt) {
+        const elapsed = Date.now() - this.lastRequestAt;
+        if (elapsed < effectiveInterval) {
+          const backingOff = (this.adaptiveDelayMs || 0) > minInterval;
+          const reason = backingOff
+            ? `Pacing for ${provider.name} (backed off after rate limit)`
+            : `Pacing requests for ${provider.name}`;
+          await this._wait(effectiveInterval - elapsed, reason, onWait);
+        }
+      }
+
+      const stamp = Date.now();
+      this.lastRequestAt = stamp;
+      if (rl?.rpm) this.timestamps.push(stamp);
+      if (rl?.rpd) {
+        this.dailyCount++;
+        if (this.dailyCount >= rl.rpd - 3 && this.dailyCount < rl.rpd && onWait) {
+          onWait(`${rl.rpd - this.dailyCount} requests remaining today (${provider.name} free tier)`);
+        }
       }
     }
   };
@@ -310,7 +335,14 @@ export async function callLLM(url, model, messages, headers, provider, { onText,
       const cls = classifyHttpError(response.status, errBody, response.headers);
 
       if (cls.retryable && attempt < maxRetries) {
-        const waitSec = Math.max(1, Math.round(cls.waitMs / 1000));
+        // Rate limits: tell the limiter to pace future requests slower, and
+        // back off exponentially here so we clear the provider's cooldown.
+        let waitMs = cls.waitMs;
+        if (cls.kind === 'rate_limit') {
+          limiter.penalize();
+          waitMs = Math.min(cls.waitMs * Math.pow(2, attempt), 60_000);
+        }
+        const waitSec = Math.max(1, Math.round(waitMs / 1000));
         if (onError) {
           let remaining = waitSec;
           onError(`${cls.message} — waiting ${remaining}s (attempt ${attempt + 1}/${maxRetries})`);
@@ -325,7 +357,7 @@ export async function callLLM(url, model, messages, headers, provider, { onText,
           clearInterval(countdownInterval);
           process.stdout.write('\r  Retrying...                                           \n');
         } else {
-          await new Promise(r => setTimeout(r, cls.waitMs));
+          await new Promise(r => setTimeout(r, waitMs));
         }
         continue;
       }
@@ -440,6 +472,9 @@ export async function callLLM(url, model, messages, headers, provider, { onText,
   const assistantMessage = { role: 'assistant' };
   if (fullContent) assistantMessage.content = fullContent;
   if (toolCallArray.length > 0) assistantMessage.tool_calls = toolCallArray;
+
+  // Clean success — let the limiter relax any adaptive 429 penalty.
+  limiter.reward();
 
   return assistantMessage;
 }
