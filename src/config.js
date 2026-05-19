@@ -140,6 +140,10 @@ export const PROVIDERS = {
     requiresKey: true,
     defaultModel: 'qwen/qwen3-coder-480b-a35b-instruct',
     description: 'NVIDIA-hosted models — FREE API key from build.nvidia.com',
+    // Free tier is ~40 RPM per model, but heavy models (480B) throttle well
+    // before that. Pace conservatively (~one request / 4s) so the agent loop
+    // rarely trips a 429 — proactive spacing beats reactive retry backoff.
+    rateLimit: { rpm: 15 },
   },
   kimi: {
     name: 'Kimi (Moonshot)',
