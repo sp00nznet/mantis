@@ -8,20 +8,27 @@
 
 import fs from 'fs';
 import path from 'path';
-import { getConfigDir } from '../src/config.js';
+import { activeDataDir } from '../src/users.js';
 
-const SESSIONS_DIR = path.join(getConfigDir(), 'sessions');
-
-function ensureDir() {
-  if (!fs.existsSync(SESSIONS_DIR)) fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+/**
+ * The sessions folder for the active context — ~/.mantis/sessions when nobody
+ * is signed in, ~/.mantis/users/<id>/sessions when a Google user is. Created
+ * on demand so each account's history stays isolated.
+ */
+function sessionsDir() {
+  const d = path.join(activeDataDir(), 'sessions');
+  if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+  return d;
 }
+
+function ensureDir() { sessionsDir(); }
 
 function genId() {
   return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
 function fileFor(id) {
-  return path.join(SESSIONS_DIR, id + '.json');
+  return path.join(sessionsDir(), id + '.json');
 }
 
 /** Create and persist a new empty session. */
@@ -60,14 +67,14 @@ export function get(id) {
 
 /** List session metadata (no message bodies), newest first. */
 export function list() {
-  ensureDir();
+  const dir = sessionsDir();
   const out = [];
   let files;
-  try { files = fs.readdirSync(SESSIONS_DIR); } catch { return out; }
+  try { files = fs.readdirSync(dir); } catch { return out; }
   for (const f of files) {
     if (!f.endsWith('.json')) continue;
     try {
-      const s = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f), 'utf-8'));
+      const s = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8'));
       out.push({
         id: s.id, title: s.title, mode: s.mode,
         provider: s.provider, model: s.model, projectId: s.projectId,

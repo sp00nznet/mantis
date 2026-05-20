@@ -12,10 +12,13 @@
 import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
-import { getConfigDir } from '../src/config.js';
+import { activeDataDir } from '../src/users.js';
 import { workspaceRoot } from './projects.js';
 
-const GIT_FILE = path.join(getConfigDir(), 'git.json');
+// Per-user git connections — each signed-in account brings its own tokens.
+function gitFile() {
+  return path.join(activeDataDir(), 'git.json');
+}
 
 const SERVICES = {
   github: { label: 'GitHub', defaultHost: 'https://github.com' },
@@ -48,11 +51,11 @@ function decToken(stored) {
 }
 
 function readConns() {
-  try { return JSON.parse(fs.readFileSync(GIT_FILE, 'utf-8')).connections || []; }
+  try { return JSON.parse(fs.readFileSync(gitFile(), 'utf-8')).connections || []; }
   catch { return []; }
 }
 function writeConns(conns) {
-  fs.writeFileSync(GIT_FILE, JSON.stringify({ connections: conns }, null, 2), 'utf-8');
+  fs.writeFileSync(gitFile(), JSON.stringify({ connections: conns }, null, 2), 'utf-8');
 }
 function getConn(id) { return readConns().find(c => c.id === id) || null; }
 

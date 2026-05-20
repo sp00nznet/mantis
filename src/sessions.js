@@ -42,11 +42,12 @@ function fmtArgs(args) {
 // ─── Session ────────────────────────────────────────────────────────
 
 class Session {
-  constructor({ name, cwd, origin, agent }) {
+  constructor({ name, cwd, origin, agent, userId }) {
     this.id = 's' + (++_seq);
     this.name = name || `session-${this.id}`;
     this.cwd = cwd || getWorkingDirectory();
     this.origin = origin || 'web';   // 'web' = hub-driven · 'cli' = a /remote REPL
+    this.userId = userId || null;    // owning user when Google auth is on
     this.createdAt = Date.now();
     this.status = 'idle';            // 'idle' | 'running'
     this.scrollback = '';            // terminal history (replayed to new viewers)
@@ -139,8 +140,11 @@ async function runWeb(session, text) {
 
 // ─── Hub API ────────────────────────────────────────────────────────
 
-export function listSessions() {
-  return [..._sessions.values()].map(s => s.toJSON());
+/** List sessions, optionally filtered to one owner (when auth is on). */
+export function listSessions(userId) {
+  return [..._sessions.values()]
+    .filter(s => !userId || s.userId === userId)
+    .map(s => s.toJSON());
 }
 
 export function getSession(id) {
@@ -151,10 +155,10 @@ export function sessionCount() {
   return _sessions.size;
 }
 
-/** Create a fresh web session with its own agent. */
-export function createWebSession({ name, cwd } = {}) {
-  const agent = createAgent();
-  const session = new Session({ name, cwd, origin: 'web', agent });
+/** Create a fresh web session with its own agent (optionally per-user). */
+export function createWebSession({ name, cwd, userId, prefs } = {}) {
+  const agent = createAgent({ prefs });
+  const session = new Session({ name, cwd, origin: 'web', agent, userId });
   session.driver = {
     input: (text) => runWeb(session, text),
     stop: () => agent.cancel(),

@@ -78,6 +78,9 @@ mantis bot discord       # run the Discord bot
   resumable history (projects & git on the way). See [docs/desktop.md](docs/desktop.md).
 - **Admin web UI** — `mantis admin` to manage keys, providers, and routing in a
   browser — plus a Sessions tab that runs live agents in xterm.js terminals.
+- **Sign-in & multi-user** — optionally require a login (built-in accounts, or
+  Google) for the admin panel and desktop app; each account gets an isolated
+  workspace, with admin/user roles. Mobile layout too. See [docs/auth.md](docs/auth.md).
 - **Plan mode** — `/plan` to explore and design without touching anything.
 - **Context management** — long conversations auto-compact instead of crashing.
 - **Persistent memory** — "save state to memory" persists notes across sessions.
@@ -162,6 +165,7 @@ The full table — base URLs, default models, free-tier notes — is in
 | [Providers](docs/providers.md) | All 22 providers, base URLs, default models |
 | [Swarm Mode](docs/swarm.md) | Multi-provider parallel execution |
 | [Proxy](docs/proxy.md) | Anthropic-compatible proxy + admin UI |
+| [Sign-in & Multi-user](docs/auth.md) | Local accounts, roles, per-account workspaces |
 | [Chat Bots](docs/bots.md) | Telegram & Discord wrappers |
 | [Desktop App](docs/desktop.md) | The Claude-style Electron app |
 | [Tools](docs/tools.md) | The 10 built-in tools |

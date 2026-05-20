@@ -138,8 +138,10 @@ The panel has a left-nav layout and opens on **Sessions**:
   threshold, timeouts) and swarm settings (lead provider, parallel workers,
   best-of-N, and the provider pool)
 
-Access is restricted to `localhost` — requests from any other address get a
-`403`.
+By default access is restricted to `localhost` — requests from any other
+address get a `403`. To reach the panel from another device (including a
+phone), enable **sign-in**, which makes network access safe and gives every
+account its own isolated workspace. See [Sign-in & Multi-user](auth.md).
 
 ### Sessions tab
 
@@ -185,5 +187,8 @@ Tool calling, streaming, images, and multi-turn conversations all work.
 
 The proxy and admin server bind to `127.0.0.1` by default. If you change
 `proxy.host` to expose it on a network, anyone who can reach it can spend your
-provider quota — put it behind a firewall or reverse proxy with auth. The admin
-UI always refuses non-loopback requests regardless of host.
+provider quota — put it behind a firewall or reverse proxy with auth.
+
+The admin UI refuses non-loopback requests **unless sign-in is enabled** — see
+[Sign-in & Multi-user](auth.md). With sign-in on, it binds to the network and
+requires a valid session (local account or Google) per request.

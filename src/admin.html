@@ -14,7 +14,7 @@
     --danger:#f85149;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  [hidden] { display: none !important; }
+  [hidden], .hidden { display: none !important; }
   body {
     font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     background: var(--bg); color: var(--text); height: 100vh; overflow: hidden;
@@ -169,6 +169,73 @@
   .fs-empty { padding: 18px; color: var(--dimmer); text-align: center; }
   .modal-foot { display: flex; gap: 8px; align-items: center;
     padding: 12px 16px; border-top: 1px solid var(--border); }
+
+  /* ── Login overlay ── */
+  #loginOverlay {
+    position: fixed; inset: 0; z-index: 100; background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .login-card {
+    text-align: center; padding: 38px 40px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 14px; width: 320px; max-width: 88vw;
+  }
+  #loginForm { display: flex; flex-direction: column; gap: 8px; }
+  #loginForm input { text-align: left; }
+  #loginForm button {
+    margin-top: 4px; padding: 9px; font-size: 13px; width: 100%;
+  }
+  .login-or { color: var(--dimmer); font-size: 11px; margin: 16px 0 10px; }
+  .login-err { color: var(--danger); font-size: 12px; margin-top: 14px; }
+  .login-logo { width: 66px; height: 66px; }
+  .login-title {
+    font-size: 22px; font-weight: 700; color: var(--accent); letter-spacing: 5px;
+    margin-top: 8px; text-shadow: 0 0 9px color-mix(in srgb, var(--accent) 50%, transparent);
+  }
+  .login-sub { color: var(--dim); font-size: 13px; margin: 6px 0 22px; }
+  .gbtn {
+    display: inline-flex; align-items: center; gap: 10px; text-decoration: none;
+    background: #fff; color: #1f1f1f; font-weight: 600; font-size: 14px;
+    padding: 11px 22px; border-radius: 8px; border: 1px solid #dadce0;
+  }
+  .gbtn:hover { background: #f3f3f3; }
+  .gicon {
+    display: inline-flex; width: 20px; height: 20px; border-radius: 50%;
+    background: #4285f4; color: #fff; align-items: center; justify-content: center;
+    font-weight: 700; font-family: Georgia, "Times New Roman", serif;
+  }
+
+  /* ── Signed-in user chip ── */
+  #userChip {
+    width: 30px; height: 30px; border-radius: 50%; margin-top: 4px;
+    background: var(--surface-hi) center / cover no-repeat;
+    border: 1px solid var(--border-hi); color: var(--dim); text-decoration: none;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700;
+  }
+  #userChip:hover { border-color: var(--danger); }
+
+  /* ── Mobile ── */
+  @media (max-width: 720px) {
+    #app { flex-direction: column; }
+    #rail {
+      width: 100%; height: 56px; flex: 0 0 56px; flex-direction: row;
+      order: 2; border-right: 0; border-top: 1px solid var(--border);
+      padding: 0 6px; justify-content: space-around;
+    }
+    .rail-logo, .rail-spacer { display: none; }
+    #userChip { margin: 0; }
+    main { order: 1; flex: 1; padding: 16px 14px; }
+    .row { flex-direction: column; align-items: stretch; }
+    .row > button { width: 100%; }
+    .grid3 { grid-template-columns: 1fr; }
+    .grid3 label { margin-top: 6px; }
+    .term-host { height: 46vh; }
+    #sessGrid { grid-template-columns: 1fr; }
+    .theme-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+    .modal-box { width: 96vw; }
+    .view-head h1 { font-size: 16px; }
+    .login-card { padding: 32px 26px; }
+  }
 </style>
 </head>
 <body>
@@ -179,8 +246,10 @@
     <a data-view="providers" title="Providers">🔌</a>
     <a data-view="proxy" title="Proxy">🌐</a>
     <a data-view="bots" title="Bots">🤖</a>
+    <a data-view="users" title="Users">👥</a>
     <div class="rail-spacer"></div>
     <a data-view="settings" title="Settings">⚙</a>
+    <a id="userChip" class="hidden" href="/auth/logout" title="Sign out"></a>
     <div id="sideFoot" hidden></div>
   </nav>
 
@@ -269,7 +338,7 @@
     <!-- ── Settings ── -->
     <div class="view" id="view-settings">
       <div class="view-head"><h1>Settings</h1></div>
-      <section class="card">
+      <section class="card" id="cardGeneral">
         <h2>General</h2>
         <label>Ollama URL</label>
         <input id="setOllamaUrl" placeholder="http://localhost:11434">
@@ -286,7 +355,7 @@
           <label for="setConfirmDestructive" style="margin:0">Confirm destructive operations</label>
         </div>
       </section>
-      <section class="card">
+      <section class="card" id="cardSwarm">
         <h2>Swarm</h2>
         <div class="row">
           <div><label>Lead provider</label><select id="setLead"></select></div>
@@ -298,16 +367,94 @@
         <label>Swarm pool — unchecked providers are excluded</label>
         <div id="setPool" class="pool-grid"></div>
       </section>
-      <div class="row" style="margin-bottom:16px"><div></div><button onclick="saveSettings()">Save settings</button></div>
+      <div class="row" id="saveSettingsRow" style="margin-bottom:16px"><div></div><button onclick="saveSettings()">Save settings</button></div>
       <section class="card">
         <h2>Theme</h2>
         <div class="hint" style="margin-bottom:10px">64 colour themes — click one to apply. Your choice is saved. A few show the mantis on the Sessions screen 🐜</div>
         <div class="theme-grid" id="themeGrid"></div>
       </section>
     </div>
+
+    <!-- ── Users & sign-in ── -->
+    <div class="view" id="view-users">
+      <div class="view-head"><h1>Users &amp; sign-in</h1></div>
+
+      <!-- sign-in OFF: first-run setup -->
+      <section class="card" id="usersSetup" hidden>
+        <h2>Enable sign-in</h2>
+        <div class="hint" style="margin-bottom:12px">
+          Turn on multi-user sign-in. You'll create the administrator account now;
+          afterwards the panel is reachable over the network and every visitor must
+          log in. Each account gets its own keys, models, history, and sessions.
+        </div>
+        <div class="row">
+          <div><label>Admin username</label><input id="enUser" placeholder="admin" autocomplete="off"></div>
+          <div><label>Admin password</label><input id="enPass" type="password" placeholder="at least 6 characters" autocomplete="new-password"></div>
+          <button onclick="enableAuth()">Enable sign-in</button>
+        </div>
+      </section>
+
+      <!-- sign-in ON: account management -->
+      <div id="usersManage" hidden>
+        <section class="card">
+          <h2>Accounts</h2>
+          <table id="userTable"></table>
+        </section>
+        <section class="card">
+          <h2>Add a user</h2>
+          <div class="row">
+            <div><label>Username</label><input id="nuUser" placeholder="username" autocomplete="off"></div>
+            <div><label>Display name</label><input id="nuName" placeholder="optional"></div>
+            <div><label>Role</label><select id="nuRole">
+              <option value="user">User</option><option value="admin">Admin</option>
+            </select></div>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <div><label>Password</label><input id="nuPass" type="password" placeholder="account password" autocomplete="new-password"></div>
+            <div id="nuEmailWrap"><label>Email</label><input id="nuEmail" placeholder="for Google sign-in (optional)"></div>
+            <button onclick="addUser()">Add user</button>
+          </div>
+          <div class="hint" id="addUserHint">Give the account a password for sign-in.</div>
+        </section>
+        <section class="card" id="googleCard">
+          <h2>Google sign-in</h2>
+          <div class="hint" id="googleStatus" style="margin-bottom:12px"></div>
+          <div class="check">
+            <input type="checkbox" id="allowGoogleSignup">
+            <label for="allowGoogleSignup" style="margin:0">Let any Google account sign in (auto-creates a user)</label>
+          </div>
+          <label>Auto-approve these email domains — comma-separated, for G Suite / Workspace</label>
+          <input id="googleDomains" placeholder="example.com, team.org">
+          <div class="row" style="margin-top:12px"><div></div><button onclick="saveGoogleAuth()">Save Google settings</button></div>
+        </section>
+        <section class="card">
+          <h2>Disable sign-in</h2>
+          <div class="hint" style="margin-bottom:12px">Turn multi-user sign-in back off — the panel returns to single-user, localhost-only. Accounts are kept in case you re-enable it.</div>
+          <button class="danger" onclick="disableAuth()">Disable sign-in</button>
+        </section>
+      </div>
+    </div>
   </main>
 </div>
 <div id="toast"></div>
+
+<div id="loginOverlay" class="hidden">
+  <div class="login-card">
+    <img class="login-logo" src="/assets/icon.png" alt="">
+    <div class="login-title">MANTIS</div>
+    <p class="login-sub">Sign in to access the control panel</p>
+    <form id="loginForm" autocomplete="on">
+      <input id="loginUser" placeholder="Username" autocomplete="username">
+      <input id="loginPass" type="password" placeholder="Password" autocomplete="current-password">
+      <button type="submit" id="loginBtn">Sign in</button>
+    </form>
+    <div id="loginGoogleWrap" class="hidden">
+      <div class="login-or">or</div>
+      <a class="gbtn" href="/auth/google"><span class="gicon">G</span> Sign in with Google</a>
+    </div>
+    <p class="login-err hidden" id="loginErr"></p>
+  </div>
+</div>
 
 <div id="fsModal" class="modal" hidden>
   <div class="modal-box">
@@ -479,11 +626,11 @@ function selectTheme(id) {
 }
 
 // ── Navigation ──
-document.querySelectorAll('nav a').forEach(function(a){
+document.querySelectorAll('nav a[data-view]').forEach(function(a){
   a.onclick = function(){ showView(a.dataset.view); };
 });
 function showView(name) {
-  document.querySelectorAll('nav a').forEach(function(a){
+  document.querySelectorAll('nav a[data-view]').forEach(function(a){
     a.classList.toggle('active', a.dataset.view === name);
   });
   document.querySelectorAll('.view').forEach(function(v){
@@ -491,6 +638,7 @@ function showView(name) {
   });
   if (name === 'sessions') { loadSessions(); }
   if (name === 'proxy') { loadRouteModels(); }
+  if (name === 'users') { renderUsers(); }
 }
 
 // ── Providers / Proxy / Bots ──
@@ -574,12 +722,208 @@ function renderConfig() {
   document.getElementById('sideFoot').innerHTML = STATE.activeProvider;
 }
 function loadState() {
-  return api('GET','/api/state').then(function(s){
-    STATE = s;
-    applyTheme(findTheme(s.theme));
-    renderConfig();
+  return fetch('/api/state').then(function(r){
+    if (r.status === 401) {
+      return r.json().then(function(d){ showLogin(d && d.googleConfigured); })
+        .catch(function(){ showLogin(false); });
+    }
+    return r.json().then(function(s){
+      hideLogin();
+      STATE = s;
+      applyTheme(findTheme(s.theme));
+      renderConfig();
+      renderUserChip();
+      applyRole();
+      renderUsers();
+    });
   });
 }
+
+// ── Sign-in ──
+function showLogin(googleConfigured) {
+  document.getElementById('loginGoogleWrap').classList.toggle('hidden', !googleConfigured);
+  document.getElementById('loginOverlay').classList.remove('hidden');
+}
+function hideLogin() { document.getElementById('loginOverlay').classList.add('hidden'); }
+
+// Role-based UI — non-admins don't see admin-only destinations.
+function applyRole() {
+  var admin = !STATE.authEnabled || STATE.role === 'admin';
+  ['proxy','bots','users'].forEach(function(v){
+    var a = document.querySelector('nav a[data-view="' + v + '"]');
+    if (a) a.classList.toggle('hidden', !admin);
+  });
+  ['cardGeneral','cardSwarm','saveSettingsRow'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el) el.hidden = !admin;
+  });
+  if (!admin) {
+    var active = document.querySelector('.view.active');
+    if (active && /view-(proxy|bots|users)/.test(active.id)) showView('sessions');
+  }
+}
+
+document.getElementById('loginForm').onsubmit = function(e){
+  e.preventDefault();
+  var btn = document.getElementById('loginBtn');
+  var err = document.getElementById('loginErr');
+  err.classList.add('hidden');
+  btn.disabled = true; btn.textContent = 'Signing in…';
+  fetch('/auth/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: document.getElementById('loginUser').value,
+      password: document.getElementById('loginPass').value,
+    }),
+  }).then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
+    .then(function(res){
+      if (res.ok && res.d && res.d.ok) { location.reload(); return; }
+      err.textContent = (res.d && res.d.error) || 'Sign-in failed';
+      err.classList.remove('hidden');
+      btn.disabled = false; btn.textContent = 'Sign in';
+    }).catch(function(){
+      err.textContent = 'Sign-in failed';
+      err.classList.remove('hidden');
+      btn.disabled = false; btn.textContent = 'Sign in';
+    });
+};
+
+// ── Users & sign-in management ──
+function renderUsers() {
+  if (!STATE) return;
+  var admin = !STATE.authEnabled || STATE.role === 'admin';
+  if (!admin) return;
+  var setup = document.getElementById('usersSetup');
+  var manage = document.getElementById('usersManage');
+  if (!STATE.authEnabled) { setup.hidden = false; manage.hidden = true; return; }
+  setup.hidden = true;
+  manage.hidden = false;
+  // Google sign-in only appears when its credentials are configured —
+  // otherwise the panel is local-accounts-only.
+  var google = !!STATE.googleConfigured;
+  document.getElementById('googleCard').hidden = !google;
+  document.getElementById('nuEmailWrap').hidden = !google;
+  document.getElementById('addUserHint').textContent = google
+    ? 'Set a password for local login, or an email so the person can sign in with Google — either works, or both.'
+    : 'Give the account a password for sign-in.';
+  if (google) {
+    document.getElementById('googleStatus').textContent =
+      'Google OAuth is configured — choose who may sign in with Google.';
+    var ac = STATE.authConfig || {};
+    document.getElementById('allowGoogleSignup').checked = !!ac.allowGoogleSignup;
+    document.getElementById('googleDomains').value = (ac.googleDomains || []).join(', ');
+  }
+  loadUserList();
+}
+function loadUserList() {
+  api('GET','/api/users').then(function(d){
+    var table = document.getElementById('userTable');
+    if (!d || !d.users) { table.innerHTML = ''; return; }
+    var rows = '';
+    d.users.forEach(function(u){
+      var me = STATE.user && STATE.user.email && u.email && STATE.user.email === u.email;
+      var methods = [];
+      if (u.hasPassword) methods.push('password');
+      if (u.google) methods.push('google');
+      if (!methods.length && u.email) methods.push('google (pending)');
+      rows += '<tr><td>' + esc(u.username) + (me ? ' <span class="tag on">you</span>' : '') + '</td>' +
+        '<td>' + esc(u.displayName || '') +
+          (u.email ? '<br><span style="color:var(--dimmer);font-size:11px">' + esc(u.email) + '</span>' : '') + '</td>' +
+        '<td><select onchange="setUserRole(\'' + u.id + '\', this.value)">' +
+          '<option value="user"' + (u.role !== 'admin' ? ' selected' : '') + '>User</option>' +
+          '<option value="admin"' + (u.role === 'admin' ? ' selected' : '') + '>Admin</option></select></td>' +
+        '<td style="color:var(--dimmer);font-size:11px">' + methods.join(', ') + '</td>' +
+        '<td style="text-align:right;white-space:nowrap">' +
+          '<button class="alt" onclick="resetUserPw(\'' + u.id + '\',\'' + esc(u.username) + '\')">Password</button> ' +
+          '<button class="danger" onclick="delUser(\'' + u.id + '\',\'' + esc(u.username) + '\')">Delete</button>' +
+        '</td></tr>';
+    });
+    table.innerHTML = rows || '<tr><td style="color:var(--dimmer)">No accounts yet.</td></tr>';
+  });
+}
+function enableAuth() {
+  var u = document.getElementById('enUser').value.trim();
+  var p = document.getElementById('enPass').value;
+  if (!u || !p) { toast('Enter a username and password', true); return; }
+  if (!confirm('Enable sign-in? The panel will require a login after this.')) return;
+  api('POST','/api/auth/enable', { username: u, password: p }).then(function(r){
+    if (r && r.ok) { toast('Sign-in enabled'); setTimeout(function(){ location.reload(); }, 700); }
+    else toast((r && r.error) || 'Failed', true);
+  });
+}
+function disableAuth() {
+  if (!confirm('Disable sign-in and return to single-user, localhost-only mode?')) return;
+  api('POST','/api/auth/disable', {}).then(function(r){
+    if (r && r.ok) { toast('Sign-in disabled'); setTimeout(function(){ location.reload(); }, 700); }
+    else toast((r && r.error) || 'Failed', true);
+  });
+}
+function addUser() {
+  var body = {
+    username: document.getElementById('nuUser').value.trim(),
+    displayName: document.getElementById('nuName').value.trim(),
+    role: document.getElementById('nuRole').value,
+    password: document.getElementById('nuPass').value,
+    email: document.getElementById('nuEmail').value.trim(),
+  };
+  api('POST','/api/users', body).then(function(r){
+    if (r && r.account) {
+      toast('User added — ' + r.account.username);
+      ['nuUser','nuName','nuPass','nuEmail'].forEach(function(id){ document.getElementById(id).value = ''; });
+      loadUserList();
+    } else {
+      toast((r && r.error) || 'Failed to add user', true);
+    }
+  });
+}
+function resetUserPw(id, name) {
+  var p = prompt('New password for ' + name + ' (at least 6 characters):');
+  if (!p) return;
+  api('POST','/api/users/' + id + '/password', { password: p }).then(function(r){
+    toast(r && r.ok ? 'Password updated' : ((r && r.error) || 'Failed'), !(r && r.ok));
+  });
+}
+function setUserRole(id, role) {
+  api('POST','/api/users/' + id + '/role', { role: role }).then(function(r){
+    if (r && r.ok) toast('Role updated');
+    else toast((r && r.error) || 'Failed', true);
+    loadUserList();
+  });
+}
+function delUser(id, name) {
+  if (!confirm('Delete the account "' + name + '"? Their data folder is left on disk.')) return;
+  api('POST','/api/users/' + id + '/delete', {}).then(function(r){
+    if (r && r.ok) { toast('User deleted'); loadUserList(); }
+    else toast((r && r.error) || 'Failed', true);
+  });
+}
+function saveGoogleAuth() {
+  var domains = document.getElementById('googleDomains').value.split(',')
+    .map(function(s){ return s.trim(); }).filter(Boolean);
+  api('POST','/api/auth/google', {
+    allowGoogleSignup: document.getElementById('allowGoogleSignup').checked,
+    googleDomains: domains,
+  }).then(function(r){ done(r, 'Google settings saved'); });
+}
+function renderUserChip() {
+  var chip = document.getElementById('userChip');
+  if (STATE && STATE.user) {
+    chip.classList.remove('hidden');
+    chip.title = 'Sign out — ' + (STATE.user.email || STATE.user.name || '');
+    if (STATE.user.picture) {
+      chip.style.backgroundImage = 'url(' + STATE.user.picture + ')';
+      chip.textContent = '';
+    } else {
+      chip.style.backgroundImage = 'none';
+      chip.textContent = (STATE.user.name || STATE.user.email || '?').slice(0, 1).toUpperCase();
+    }
+  } else {
+    chip.classList.add('hidden');
+  }
+}
+document.getElementById('userChip').onclick = function(e){
+  if (!confirm('Sign out of Mantis?')) e.preventDefault();
+};
 
 function saveActive() {
   var model = document.getElementById('activeModel').value;
@@ -726,6 +1070,7 @@ function loadRouteModels() {
 // ── Sessions ──
 function loadSessions() {
   return api('GET','/api/sessions').then(function(list){
+    if (!Array.isArray(list)) return; // not signed in — loadState shows the login screen
     SESSIONS = list || [];
     document.getElementById('navSessCount').textContent = SESSIONS.length;
     if (SEL && !SESSIONS.some(function(s){ return s.id === SEL; })) SEL = null;
@@ -954,6 +1299,7 @@ document.addEventListener('keydown', function(e){
 setInterval(function(){
   if (document.getElementById('view-sessions').classList.contains('active')) {
     api('GET','/api/sessions').then(function(list){
+      if (!Array.isArray(list)) return;
       SESSIONS = list || [];
       document.getElementById('navSessCount').textContent = SESSIONS.length;
       renderChipDots();

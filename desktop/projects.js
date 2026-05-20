@@ -13,18 +13,24 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { exec } from 'child_process';
-import { getConfigDir, getConfig } from '../src/config.js';
+import { getConfig } from '../src/config.js';
+import { activeDataDir } from '../src/users.js';
 
-const PROJECTS_FILE = path.join(getConfigDir(), 'projects.json');
 const DEFAULT_WORKSPACE = path.join(os.homedir(), 'MantisProjects');
 const SKIP = ['node_modules', '.git', '.next', 'dist', '.cache', '.venv', 'venv', '__pycache__'];
 
+// Per-user project registry — each signed-in account sees only its own
+// projects. The workspace folder on disk is shared (see workspaceRoot).
+function projectsFile() {
+  return path.join(activeDataDir(), 'projects.json');
+}
+
 function readAll() {
-  try { return JSON.parse(fs.readFileSync(PROJECTS_FILE, 'utf-8')); }
+  try { return JSON.parse(fs.readFileSync(projectsFile(), 'utf-8')); }
   catch { return []; }
 }
 function writeAll(arr) {
-  fs.writeFileSync(PROJECTS_FILE, JSON.stringify(arr, null, 2), 'utf-8');
+  fs.writeFileSync(projectsFile(), JSON.stringify(arr, null, 2), 'utf-8');
 }
 function genId() {
   return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);

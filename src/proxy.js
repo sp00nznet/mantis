@@ -574,8 +574,10 @@ async function handleRequest(req, res) {
     return;
   }
 
-  // Admin UI is mounted alongside the proxy.
-  if (url === '/admin' || url.startsWith('/admin/') || url.startsWith('/api/')) {
+  // Admin UI is mounted alongside the proxy — including its API, Google auth
+  // routes, and static assets.
+  if (url === '/admin' || url.startsWith('/admin/') || url.startsWith('/api/') ||
+      url.startsWith('/auth/') || url.startsWith('/assets/') || url === '/favicon.ico') {
     return handleAdminRequest(req, res);
   }
 

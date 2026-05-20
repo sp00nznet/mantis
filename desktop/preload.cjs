@@ -6,6 +6,12 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('mantis', {
+  // sign-in
+  authStatus: () => ipcRenderer.invoke('auth:status'),
+  signInLocal: (username, password) => ipcRenderer.invoke('auth:signInLocal', { username, password }),
+  signInGoogle: () => ipcRenderer.invoke('auth:signInGoogle'),
+  signOut: () => ipcRenderer.invoke('auth:signOut'),
+
   // sessions / history
   listSessions: () => ipcRenderer.invoke('sessions:list'),
   getSession: (id) => ipcRenderer.invoke('sessions:get', id),

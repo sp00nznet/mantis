@@ -219,6 +219,20 @@ const DEFAULTS = {
     port: 8788,
     host: '127.0.0.1',
   },
+  // Sign-in — when auth.enabled is true the admin panel and desktop app
+  // require a login (local username/password, and optionally Google) and
+  // namespace data per account. Off by default → single-user, loopback-only.
+  auth: {
+    enabled: false,
+    allowGoogleSignup: false,  // let any Google account sign in and self-provision
+    googleDomains: [],         // email domains auto-provisioned on Google sign-in
+  },
+  // Google OAuth — optional. When clientId+clientSecret are set, "Sign in with
+  // Google" is offered alongside local login (see auth.enabled above).
+  google: {
+    clientId: '',
+    clientSecret: '',
+  },
 };
 
 let config = { ...DEFAULTS };
@@ -232,7 +246,7 @@ export function loadConfig() {
       config = { ...DEFAULTS, ...saved };
       // Deep-merge nested config objects so new default keys survive an old
       // config.json that predates them (shallow spread would drop them).
-      for (const k of ['swarm', 'proxy', 'bots', 'admin']) {
+      for (const k of ['swarm', 'proxy', 'bots', 'admin', 'auth', 'google']) {
         config[k] = { ...DEFAULTS[k], ...(saved[k] || {}) };
       }
       config.proxy.routes = { ...DEFAULTS.proxy.routes, ...(saved.proxy?.routes || {}) };
@@ -265,18 +279,21 @@ export function getConfigDir() {
  * @param {string} providerKey - key into PROVIDERS
  * @param {string} [modelOverride] - explicit model; falls back to active/default
  */
-export function buildConnection(providerKey, modelOverride) {
+export function buildConnection(providerKey, modelOverride, prefs) {
   const provider = PROVIDERS[providerKey];
   if (!provider) return null;
+
+  // prefs (a per-user prefs object) override the global config when given.
+  const keys = (prefs && prefs.providerKeys) || config.providerKeys || {};
+  const ollamaUrl = (prefs && prefs.ollamaUrl) || config.ollamaUrl;
 
   const headers = { 'Content-Type': 'application/json' };
   let url;
   if (providerKey === 'local') {
-    url = `${config.ollamaUrl.replace(/\/+$/, '')}/v1/chat/completions`;
+    url = `${ollamaUrl.replace(/\/+$/, '')}/v1/chat/completions`;
   } else {
     url = `${provider.baseUrl.replace(/\/+$/, '')}/chat/completions`;
-    const apiKey = config.providerKeys?.[providerKey];
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+    if (keys[providerKey]) headers['Authorization'] = `Bearer ${keys[providerKey]}`;
   }
 
   const model = modelOverride

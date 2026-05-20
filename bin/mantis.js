@@ -12,6 +12,9 @@ function printUsage() {
     mantis admin             Start the admin web UI
     mantis bot telegram      Run the Telegram bot
     mantis bot discord       Run the Discord bot
+    mantis auth admin <u> <p>  Create/reset the admin account and enable sign-in
+    mantis auth disable      Turn sign-in off (back to single-user)
+    mantis auth list         List accounts
     mantis help              Show this message
 
   The proxy lets the real Claude Code CLI, VS Code, and JetBrains run on
@@ -65,6 +68,50 @@ async function main() {
       } catch {
         // startup error — the bot module already printed a friendly reason
         process.exit(1);
+      }
+      break;
+    }
+
+    case 'auth': {
+      loadConfig();
+      const accounts = await import('../src/accounts.js');
+      const { getConfig, saveConfig } = await import('../src/config.js');
+      const action = (process.argv[3] || '').toLowerCase();
+
+      if (action === 'admin') {
+        const username = process.argv[4];
+        const password = process.argv[5];
+        if (!username || !password) {
+          console.error('  Usage: mantis auth admin <username> <password>');
+          process.exit(1);
+        }
+        const existing = accounts.findByUsername(username);
+        if (existing) {
+          const pr = accounts.setPassword(existing.id, password);
+          if (pr.error) { console.error('  ' + pr.error); process.exit(1); }
+          accounts.setRole(existing.id, 'admin');
+          console.log(`  Reset password and granted admin to "${username}".`);
+        } else {
+          const r = accounts.createAccount({ username, password, role: 'admin' });
+          if (r.error) { console.error('  ' + r.error); process.exit(1); }
+          console.log(`  Created admin account "${username}".`);
+        }
+        saveConfig({ auth: { ...getConfig().auth, enabled: true } });
+        console.log('  Sign-in is enabled. Restart the admin panel / desktop app.');
+      } else if (action === 'disable') {
+        saveConfig({ auth: { ...getConfig().auth, enabled: false } });
+        console.log('  Sign-in disabled — back to single-user, localhost-only.');
+      } else if (action === 'list') {
+        const list = accounts.listAccounts();
+        if (!list.length) console.log('  No accounts yet.');
+        for (const u of list) {
+          const tag = u.role === 'admin' ? '[admin]' : '[user] ';
+          console.log(`  ${tag} ${u.username}${u.email ? '  <' + u.email + '>' : ''}`);
+        }
+      } else {
+        const on = getConfig().auth?.enabled;
+        console.log(`  Sign-in is ${on ? 'ENABLED' : 'disabled'} — ${accounts.accountCount()} account(s).`);
+        console.log('  Usage: mantis auth <admin <user> <pass> | disable | list>');
       }
       break;
     }

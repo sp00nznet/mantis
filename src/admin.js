@@ -1,12 +1,19 @@
 /**
- * Admin web UI — a loopback-only control panel for Mantis.
+ * Admin web UI.
  *
- * Manages provider keys, the active provider, proxy tier routing, and bot
- * tokens, and hosts the Sessions tab: live xterm.js terminals backed by the
- * session hub (see sessions.js). The page markup lives in admin.html.
+ * Manages provider keys, the active provider, proxy routing, bot tokens, and
+ * the Sessions tab. Page markup lives in admin.html.
  *
- * `handleAdminRequest` is also mounted on the proxy server, so `mantis serve`
- * exposes the panel at http://127.0.0.1:8787/admin.
+ * Access control:
+ *  - Sign-in OFF → loopback-only, single shared config (legacy behaviour).
+ *  - Sign-in ON  → network-reachable, each request needs a session cookie;
+ *    provider keys / model / theme / sessions are per-account. Admins also
+ *    manage user accounts and server-global settings.
+ *
+ * Accounts are local username/password by default (see accounts.js); Google
+ * sign-in is an optional add-on.
+ *
+ * Also mounted on the proxy server, so `mantis serve` exposes it at /admin.
  */
 
 import http from 'http';
@@ -19,34 +26,76 @@ import { getWorkingDirectory } from './tools.js';
 import {
   listSessions, getSession, createWebSession, removeSession, sendInput, stopSession,
 } from './sessions.js';
+import * as auth from './auth.js';
+import * as users from './users.js';
+import * as accounts from './accounts.js';
 
 const ADMIN_DIR = path.dirname(fileURLToPath(import.meta.url));
 const HTML_PATH = path.join(ADMIN_DIR, 'admin.html');
 const ASSETS_DIR = path.join(ADMIN_DIR, 'assets');
 
-// ─── Loopback guard ─────────────────────────────────────────────────
+// ─── Access helpers ─────────────────────────────────────────────────
 
 function isLoopback(req) {
   const addr = req.socket?.remoteAddress || '';
   return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1' || addr === '';
 }
 
+/**
+ * Whether the request may manage users and server-global settings. With
+ * sign-in off, the loopback owner is implicitly the admin; with it on, the
+ * signed-in account must have the admin role.
+ */
+function isAdmin(req) {
+  if (!auth.isAuthEnabled()) return isLoopback(req);
+  return !!(req._user && req._user.role === 'admin');
+}
+
+/** The active context's preferences — per-user when signed in, else global. */
+function ctxPrefs(req) {
+  if (req._user) return users.getUserPrefs(req._user.userId);
+  const c = getConfig();
+  return {
+    provider: c.provider, model: c.model, providerKeys: c.providerKeys || {},
+    theme: c.adminTheme || 'mantis', ollamaUrl: c.ollamaUrl,
+  };
+}
+
+/** Save preference updates — to the user's prefs when signed in, else global. */
+function ctxSavePrefs(req, updates) {
+  if (req._user) { users.saveUserPrefs(req._user.userId, updates); return; }
+  const map = {};
+  if ('provider' in updates) map.provider = updates.provider;
+  if ('model' in updates) map.model = updates.model;
+  if ('providerKeys' in updates) map.providerKeys = updates.providerKeys;
+  if ('theme' in updates) map.adminTheme = updates.theme;
+  saveConfig(map);
+}
+
 // ─── State snapshot ─────────────────────────────────────────────────
 
-function buildState() {
+function buildState(req) {
   const config = getConfig();
-  const keys = config.providerKeys || {};
+  const prefs = ctxPrefs(req);
+  const keys = prefs.providerKeys || {};
   const providers = Object.entries(PROVIDERS).map(([key, p]) => ({
-    key,
-    name: p.name,
-    requiresKey: p.requiresKey,
-    hasKey: !!keys[key],
-    defaultModel: p.defaultModel,
+    key, name: p.name, requiresKey: p.requiresKey, hasKey: !!keys[key], defaultModel: p.defaultModel,
   }));
   return {
-    activeProvider: config.provider,
-    activeModel: config.model,
-    theme: config.adminTheme || 'mantis',
+    authEnabled: auth.isAuthEnabled(),
+    googleConfigured: auth.isGoogleConfigured(),
+    // The loopback owner acts as an admin when sign-in is off.
+    role: req._user ? req._user.role : 'admin',
+    user: req._user
+      ? { email: req._user.email, name: req._user.name, picture: req._user.picture, role: req._user.role }
+      : null,
+    authConfig: {
+      allowGoogleSignup: !!config.auth?.allowGoogleSignup,
+      googleDomains: config.auth?.googleDomains || [],
+    },
+    activeProvider: prefs.provider,
+    activeModel: prefs.model,
+    theme: prefs.theme || 'mantis',
     cwd: getWorkingDirectory(),
     providers,
     proxy: {
@@ -80,18 +129,18 @@ function buildState() {
   };
 }
 
-// ─── Provider connection test ───────────────────────────────────────
+// ─── Provider connection test / model listing (per-user keys) ───────
 
-async function testProvider(providerKey) {
+async function testProvider(providerKey, prefs) {
   const config = getConfig();
   const p = PROVIDERS[providerKey];
   if (!p) return { ok: false, message: `Unknown provider: ${providerKey}` };
 
   const base = providerKey === 'local'
-    ? `${config.ollamaUrl.replace(/\/+$/, '')}/v1`
+    ? `${(prefs.ollamaUrl || config.ollamaUrl).replace(/\/+$/, '')}/v1`
     : p.baseUrl.replace(/\/+$/, '');
   const headers = { 'Content-Type': 'application/json' };
-  const apiKey = config.providerKeys?.[providerKey];
+  const apiKey = (prefs.providerKeys || {})[providerKey];
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
   try {
@@ -104,11 +153,7 @@ async function testProvider(providerKey) {
       response = await fetch(`${base}/chat/completions`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          model: config.swarm?.providerModels?.[providerKey] || p.defaultModel,
-          messages: [{ role: 'user', content: 'ping' }],
-          max_tokens: 1,
-        }),
+        body: JSON.stringify({ model: p.defaultModel, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 }),
         signal: AbortSignal.timeout(15000),
       });
       if (response.ok) return { ok: true, message: 'Connected — provider is responding' };
@@ -120,17 +165,16 @@ async function testProvider(providerKey) {
   }
 }
 
-/** Fetch the model catalogue a provider exposes via /models. */
-async function listModels(providerKey) {
+async function listModels(providerKey, prefs) {
   const config = getConfig();
   const p = PROVIDERS[providerKey];
   if (!p) return { error: 'Unknown provider', models: [] };
 
   const base = providerKey === 'local'
-    ? `${config.ollamaUrl.replace(/\/+$/, '')}/v1`
+    ? `${(prefs.ollamaUrl || config.ollamaUrl).replace(/\/+$/, '')}/v1`
     : p.baseUrl.replace(/\/+$/, '');
   const headers = { 'Content-Type': 'application/json' };
-  const apiKey = config.providerKeys?.[providerKey];
+  const apiKey = (prefs.providerKeys || {})[providerKey];
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
   try {
@@ -174,6 +218,75 @@ function readJson(req, limit = 1024 * 1024) {
   });
 }
 
+// ─── Sign-in routes ─────────────────────────────────────────────────
+
+function authErrorPage(res, message) {
+  const msg = String(message).replace(/</g, '&lt;');
+  res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(`<body style="font-family:sans-serif;background:#0d1117;color:#c9d1d9;padding:40px">` +
+    `<h2>Sign-in failed</h2><p>${msg}</p><p><a style="color:#58a6ff" href="/admin">Back</a></p></body>`);
+}
+
+async function handleAuth(req, res, url) {
+  const proto = req.headers['x-forwarded-proto'] || 'http';
+  const host = req.headers.host || '127.0.0.1';
+  const redirectUri = `${proto}://${host}/auth/callback`;
+
+  // Local username/password login (the login page POSTs JSON here).
+  if (url === '/auth/login' && req.method === 'POST') {
+    const body = await readJson(req);
+    const r = accounts.verifyLogin(body.username, body.password);
+    if (r.error) return sendJson(res, 401, { error: r.error });
+    const token = auth.createSession({
+      userId: r.account.id, email: r.account.email,
+      name: r.account.displayName, role: r.account.role,
+    });
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': auth.sessionCookie(token) });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  // Start the Google OAuth flow.
+  if (url === '/auth/google') {
+    if (!auth.isGoogleConfigured()) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Google sign-in is not configured');
+      return;
+    }
+    res.writeHead(302, { Location: auth.loginUrl(redirectUri) });
+    res.end();
+    return;
+  }
+
+  // Google OAuth redirect target.
+  if (url === '/auth/callback') {
+    const code = new URL(req.url, 'http://x').searchParams.get('code');
+    if (!code) return authErrorPage(res, 'No authorization code was returned');
+    const result = await auth.exchangeCode(code, redirectUri);
+    if (result.error) return authErrorPage(res, result.error);
+    const resolved = accounts.resolveGoogleAccount(result.user);
+    if (resolved.error) return authErrorPage(res, resolved.error);
+    const acct = resolved.account;
+    const token = auth.createSession({
+      userId: acct.id, email: acct.email, name: acct.displayName,
+      picture: result.user.picture, role: acct.role,
+    });
+    res.writeHead(302, { 'Set-Cookie': auth.sessionCookie(token), Location: '/admin' });
+    res.end();
+    return;
+  }
+
+  if (url === '/auth/logout') {
+    auth.destroySession(auth.readCookie(req, auth.COOKIE_NAME));
+    res.writeHead(302, { 'Set-Cookie': auth.clearCookie(), Location: '/admin' });
+    res.end();
+    return;
+  }
+
+  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.end('Not found');
+}
+
 // ─── Session API ────────────────────────────────────────────────────
 
 function streamSession(req, res, session) {
@@ -184,7 +297,6 @@ function streamSession(req, res, session) {
     'X-Accel-Buffering': 'no',
   });
   session.subscribe(res);
-  // Heartbeat so idle connections aren't dropped.
   const ping = setInterval(() => {
     try { res.write(': ping\n\n'); } catch { /* ignore */ }
   }, 25000);
@@ -195,15 +307,20 @@ function streamSession(req, res, session) {
 }
 
 async function handleSessionApi(req, res, parts) {
-  // parts = ['api','sessions', id?, action?]
   const id = parts[2];
   const action = parts[3];
+  const uid = req._user ? req._user.userId : null;
 
   if (!id) {
-    if (req.method === 'GET') return sendJson(res, 200, listSessions());
+    if (req.method === 'GET') return sendJson(res, 200, listSessions(uid));
     if (req.method === 'POST') {
       const body = await readJson(req);
-      const session = createWebSession({ name: (body.name || '').trim(), cwd: (body.cwd || '').trim() });
+      const session = createWebSession({
+        name: (body.name || '').trim(),
+        cwd: (body.cwd || '').trim(),
+        userId: uid,
+        prefs: req._user ? users.getUserPrefs(uid) : null,
+      });
       return sendJson(res, 200, session.toJSON());
     }
     return sendJson(res, 405, { error: 'Method not allowed' });
@@ -211,10 +328,12 @@ async function handleSessionApi(req, res, parts) {
 
   const session = getSession(id);
   if (!session) return sendJson(res, 404, { error: 'No such session' });
-
-  if (action === 'stream' && req.method === 'GET') {
-    return streamSession(req, res, session);
+  // When signed in, a user may only touch their own sessions.
+  if (uid && session.userId && session.userId !== uid) {
+    return sendJson(res, 403, { error: 'Not your session' });
   }
+
+  if (action === 'stream' && req.method === 'GET') return streamSession(req, res, session);
   if (action === 'input' && req.method === 'POST') {
     const body = await readJson(req);
     if (!body.text) return sendJson(res, 400, { error: 'text is required' });
@@ -232,24 +351,59 @@ async function handleSessionApi(req, res, parts) {
   return sendJson(res, 404, { error: 'No such session route' });
 }
 
-// ─── Filesystem browser (directory picker) ──────────────────────────
+// ─── User management API (admin only) ──────────────────────────────
+
+async function handleUsersApi(req, res, parts) {
+  if (!isAdmin(req)) return sendJson(res, 403, { error: 'Administrators only' });
+  const id = parts[2];
+  const action = parts[3];
+
+  if (!id) {
+    if (req.method === 'GET') return sendJson(res, 200, { users: accounts.listAccounts() });
+    if (req.method === 'POST') {
+      const body = await readJson(req);
+      const r = accounts.createAccount({
+        username: body.username, password: body.password, email: body.email,
+        displayName: body.displayName, role: body.role === 'admin' ? 'admin' : 'user',
+      });
+      return sendJson(res, r.error ? 400 : 200, r);
+    }
+    return sendJson(res, 405, { error: 'Method not allowed' });
+  }
+
+  if (action === 'password' && req.method === 'POST') {
+    const body = await readJson(req);
+    const r = accounts.setPassword(id, body.password);
+    return sendJson(res, r.error ? 400 : 200, r);
+  }
+  if (action === 'role' && req.method === 'POST') {
+    const body = await readJson(req);
+    const r = accounts.setRole(id, body.role);
+    return sendJson(res, r.error ? 400 : 200, r);
+  }
+  if (action === 'delete' && req.method === 'POST') {
+    if (req._user && req._user.userId === id) {
+      return sendJson(res, 400, { error: 'You cannot delete your own account' });
+    }
+    const r = accounts.deleteAccount(id);
+    return sendJson(res, r.error ? 400 : 200, r);
+  }
+  return sendJson(res, 404, { error: 'No such users route' });
+}
+
+// ─── Filesystem browser ─────────────────────────────────────────────
 
 function listDrives() {
   const drives = [];
-  for (let c = 65; c <= 90; c++) { // A..Z
+  for (let c = 65; c <= 90; c++) {
     const d = String.fromCharCode(c) + ':\\';
     try { if (fs.existsSync(d)) drives.push(d); } catch { /* ignore */ }
   }
   return drives;
 }
 
-/**
- * List subdirectories of a path.
- * rawPath: null → default to the working dir · '' → Windows drive list / root.
- */
 function handleFsList(res, rawPath) {
   const isWin = process.platform === 'win32';
-
   if (rawPath === '') {
     if (isWin) {
       return sendJson(res, 200, {
@@ -259,17 +413,13 @@ function handleFsList(res, rawPath) {
     }
     rawPath = '/';
   }
-
   let dir;
   try { dir = path.resolve(rawPath || getWorkingDirectory()); }
   catch { dir = getWorkingDirectory(); }
 
   let entries;
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch (err) {
-    return sendJson(res, 400, { error: `Cannot open ${dir}: ${err.code || err.message}` });
-  }
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+  catch (err) { return sendJson(res, 400, { error: `Cannot open ${dir}: ${err.code || err.message}` }); }
 
   const dirs = entries
     .filter(e => { try { return e.isDirectory(); } catch { return false; } })
@@ -278,10 +428,8 @@ function handleFsList(res, rawPath) {
     .slice(0, 1000)
     .map(name => ({ name, path: path.join(dir, name) }));
 
-  // '' as a parent means "go up to the Windows drive list".
   const root = path.parse(dir).root;
   const parent = dir === root ? (isWin ? '' : null) : path.dirname(dir);
-
   sendJson(res, 200, { path: dir, parent, isDrives: false, home: os.homedir(), dirs });
 }
 
@@ -290,47 +438,73 @@ async function handleFsMkdir(req, res) {
   const base = body.path;
   const name = (body.name || '').trim();
   if (!base || !name) return sendJson(res, 400, { error: 'path and name are required' });
-  if (/[\\/:*?"<>|]/.test(name)) {
-    return sendJson(res, 400, { error: 'Folder name has invalid characters' });
-  }
+  if (/[\\/:*?"<>|]/.test(name)) return sendJson(res, 400, { error: 'Folder name has invalid characters' });
   const target = path.join(base, name);
   try {
     fs.mkdirSync(target);
     return sendJson(res, 200, { ok: true, path: target });
   } catch (err) {
-    return sendJson(res, 400, {
-      error: err.code === 'EEXIST' ? 'That folder already exists' : err.message,
-    });
+    return sendJson(res, 400, { error: err.code === 'EEXIST' ? 'That folder already exists' : err.message });
   }
 }
 
-// ─── Config API ─────────────────────────────────────────────────────
+// ─── API router ─────────────────────────────────────────────────────
 
 async function handleApi(req, res, url) {
   const config = getConfig();
-  const parts = url.split('/').filter(Boolean); // ['api', ...]
+  const parts = url.split('/').filter(Boolean);
 
-  if (parts[1] === 'sessions') {
-    return handleSessionApi(req, res, parts);
+  if (parts[1] === 'sessions') return handleSessionApi(req, res, parts);
+  if (parts[1] === 'users') return handleUsersApi(req, res, parts);
+
+  // ── Sign-in setup ──
+
+  if (url === '/api/auth/enable' && req.method === 'POST') {
+    if (auth.isAuthEnabled()) return sendJson(res, 400, { error: 'Sign-in is already enabled' });
+    if (!isLoopback(req)) return sendJson(res, 403, { error: 'Run this from the local machine' });
+    const body = await readJson(req);
+    const r = accounts.createAccount({
+      username: body.username, password: body.password,
+      displayName: body.displayName, role: 'admin',
+    });
+    if (r.error) return sendJson(res, 400, r);
+    saveConfig({ auth: { ...config.auth, enabled: true } });
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (url === '/api/auth/disable' && req.method === 'POST') {
+    if (!isAdmin(req)) return sendJson(res, 403, { error: 'Administrators only' });
+    saveConfig({ auth: { ...config.auth, enabled: false } });
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (url === '/api/auth/google' && req.method === 'POST') {
+    if (!isAdmin(req)) return sendJson(res, 403, { error: 'Administrators only' });
+    const body = await readJson(req);
+    const a = { ...config.auth };
+    if (typeof body.allowGoogleSignup === 'boolean') a.allowGoogleSignup = body.allowGoogleSignup;
+    if (Array.isArray(body.googleDomains)) {
+      a.googleDomains = body.googleDomains.map(d => String(d).trim().toLowerCase()).filter(Boolean);
+    }
+    saveConfig({ auth: a });
+    return sendJson(res, 200, { ok: true });
   }
 
   if (parts[1] === 'fs') {
     if (parts[2] === 'list' && req.method === 'GET') {
       return handleFsList(res, new URL(req.url, 'http://x').searchParams.get('path'));
     }
-    if (parts[2] === 'mkdir' && req.method === 'POST') {
-      return handleFsMkdir(req, res);
-    }
+    if (parts[2] === 'mkdir' && req.method === 'POST') return handleFsMkdir(req, res);
     return sendJson(res, 404, { error: 'No such fs route' });
   }
 
   if (url === '/api/state' && req.method === 'GET') {
-    return sendJson(res, 200, buildState());
+    return sendJson(res, 200, buildState(req));
   }
 
   if (url === '/api/theme' && req.method === 'POST') {
     const body = await readJson(req);
-    if (body.id) saveConfig({ adminTheme: String(body.id) });
+    if (body.id) ctxSavePrefs(req, { theme: String(body.id) });
     return sendJson(res, 200, { ok: true });
   }
 
@@ -339,10 +513,10 @@ async function handleApi(req, res, url) {
     if (!body.provider || !PROVIDERS[body.provider]) {
       return sendJson(res, 400, { error: 'Unknown provider' });
     }
-    const keys = { ...(config.providerKeys || {}) };
+    const keys = { ...(ctxPrefs(req).providerKeys || {}) };
     if (body.key) keys[body.provider] = body.key.trim();
     else delete keys[body.provider];
-    saveConfig({ providerKeys: keys });
+    ctxSavePrefs(req, { providerKeys: keys });
     return sendJson(res, 200, { ok: true });
   }
 
@@ -352,8 +526,25 @@ async function handleApi(req, res, url) {
       return sendJson(res, 400, { error: 'Unknown provider' });
     }
     const model = (body.model || '').trim() || PROVIDERS[body.provider].defaultModel;
-    saveConfig({ provider: body.provider, model });
+    ctxSavePrefs(req, { provider: body.provider, model });
     return sendJson(res, 200, { ok: true });
+  }
+
+  if (url.startsWith('/api/provider/models') && req.method === 'GET') {
+    const provider = new URL(req.url, 'http://x').searchParams.get('provider');
+    return sendJson(res, 200, await listModels(provider, ctxPrefs(req)));
+  }
+
+  if (url.startsWith('/api/provider/test') && req.method === 'GET') {
+    const provider = new URL(req.url, 'http://x').searchParams.get('provider');
+    return sendJson(res, 200, await testProvider(provider, ctxPrefs(req)));
+  }
+
+  // ── Server-global settings (admin only) ──
+
+  if ((url === '/api/proxy' || url === '/api/bots' || url === '/api/settings') &&
+      req.method === 'POST' && !isAdmin(req)) {
+    return sendJson(res, 403, { error: 'Administrators only' });
   }
 
   if (url === '/api/proxy' && req.method === 'POST') {
@@ -392,24 +583,12 @@ async function handleApi(req, res, url) {
   if (url === '/api/settings' && req.method === 'POST') {
     const body = await readJson(req);
     const updates = {};
-    if (typeof body.ollamaUrl === 'string' && body.ollamaUrl.trim()) {
-      updates.ollamaUrl = body.ollamaUrl.trim();
-    }
-    if (Number.isFinite(body.maxContextTokens)) {
-      updates.maxContextTokens = Math.max(1024, Math.round(body.maxContextTokens));
-    }
-    if (Number.isFinite(body.compactThreshold)) {
-      updates.compactThreshold = Math.min(0.95, Math.max(0.1, body.compactThreshold));
-    }
-    if (Number.isFinite(body.commandTimeout)) {
-      updates.commandTimeout = Math.max(1000, Math.round(body.commandTimeout));
-    }
-    if (Number.isFinite(body.maxToolResultSize)) {
-      updates.maxToolResultSize = Math.max(1000, Math.round(body.maxToolResultSize));
-    }
-    if (typeof body.confirmDestructive === 'boolean') {
-      updates.confirmDestructive = body.confirmDestructive;
-    }
+    if (typeof body.ollamaUrl === 'string' && body.ollamaUrl.trim()) updates.ollamaUrl = body.ollamaUrl.trim();
+    if (Number.isFinite(body.maxContextTokens)) updates.maxContextTokens = Math.max(1024, Math.round(body.maxContextTokens));
+    if (Number.isFinite(body.compactThreshold)) updates.compactThreshold = Math.min(0.95, Math.max(0.1, body.compactThreshold));
+    if (Number.isFinite(body.commandTimeout)) updates.commandTimeout = Math.max(1000, Math.round(body.commandTimeout));
+    if (Number.isFinite(body.maxToolResultSize)) updates.maxToolResultSize = Math.max(1000, Math.round(body.maxToolResultSize));
+    if (typeof body.confirmDestructive === 'boolean') updates.confirmDestructive = body.confirmDestructive;
     if (body.swarm && typeof body.swarm === 'object') {
       const swarm = { ...config.swarm };
       if (Number.isFinite(body.swarm.maxParallelWorkers)) {
@@ -432,16 +611,6 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true });
   }
 
-  if (url.startsWith('/api/provider/models') && req.method === 'GET') {
-    const provider = new URL(req.url, 'http://x').searchParams.get('provider');
-    return sendJson(res, 200, await listModels(provider));
-  }
-
-  if (url.startsWith('/api/provider/test') && req.method === 'GET') {
-    const provider = new URL(req.url, 'http://x').searchParams.get('provider');
-    return sendJson(res, 200, await testProvider(provider));
-  }
-
   return sendJson(res, 404, { error: 'No such API route' });
 }
 
@@ -460,35 +629,50 @@ function serveStatic(res, url) {
   res.end(data);
 }
 
-export async function handleAdminRequest(req, res) {
-  if (!isLoopback(req)) {
-    res.writeHead(403, { 'Content-Type': 'text/plain' });
-    res.end('Admin UI is restricted to localhost.\n');
+function servePage(res) {
+  let html;
+  try { html = fs.readFileSync(HTML_PATH, 'utf-8'); }
+  catch {
+    res.writeHead(500, { 'Content-Type': 'text/plain' });
+    res.end('admin.html not found');
     return;
   }
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(html);
+}
 
+export async function handleAdminRequest(req, res) {
   const url = (req.url || '/').split('?')[0];
+  const authOn = auth.isAuthEnabled();
 
   try {
-    if (url.startsWith('/api/')) {
-      return await handleApi(req, res, url);
-    }
-    if (url === '/favicon.ico' || url.startsWith('/assets/')) {
-      return serveStatic(res, url);
-    }
-    if (url === '/admin' || url === '/admin/' || url === '/') {
-      let html;
-      try {
-        html = fs.readFileSync(HTML_PATH, 'utf-8');
-      } catch {
-        res.writeHead(500, { 'Content-Type': 'text/plain' });
-        res.end('admin.html not found');
+    // Auth + static assets are always reachable.
+    if (authOn && url.startsWith('/auth/')) return await handleAuth(req, res, url);
+    if (url === '/favicon.ico' || url.startsWith('/assets/')) return serveStatic(res, url);
+
+    if (authOn) {
+      // Network access allowed; require a valid session.
+      const session = auth.getSession(auth.readCookie(req, auth.COOKIE_NAME));
+      if (!session) {
+        if (url.startsWith('/api/')) {
+          return sendJson(res, 401, { error: 'auth-required', googleConfigured: auth.isGoogleConfigured() });
+        }
+        return servePage(res); // admin.html shows the sign-in screen on a 401
+      }
+      req._user = session;
+    } else {
+      // Sign-in not enabled — keep the loopback-only restriction.
+      if (!isLoopback(req)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('Admin UI is restricted to localhost. Enable sign-in to allow network access.\n');
         return;
       }
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(html);
-      return;
+      req._user = null;
     }
+
+    if (url.startsWith('/api/')) return await handleApi(req, res, url);
+    if (url === '/admin' || url === '/admin/' || url === '/') return servePage(res);
+
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('Not found\n');
   } catch (err) {
@@ -497,13 +681,14 @@ export async function handleAdminRequest(req, res) {
 }
 
 /**
- * Start a standalone admin server (not behind the proxy).
+ * Start a standalone admin server.
  * @returns {Promise<import('http').Server>}
  */
 export function startAdmin({ port, host } = {}) {
   const config = getConfig();
   const wantPort = port || config.admin?.port || 8788;
-  const listenHost = host || config.admin?.host || '127.0.0.1';
+  // With sign-in on, bind to all interfaces so other devices can reach it.
+  const listenHost = host || (auth.isAuthEnabled() ? '0.0.0.0' : (config.admin?.host || '127.0.0.1'));
   return new Promise((resolve, reject) => {
     let p = wantPort;
     const attempt = () => {
@@ -512,7 +697,6 @@ export function startAdmin({ port, host } = {}) {
           try { res.writeHead(500); res.end(); } catch { /* ignore */ }
         });
       });
-      // If the port is busy (another admin instance, say), try the next one.
       server.once('error', (err) => {
         if (err.code === 'EADDRINUSE' && p < wantPort + 12) {
           p += 1;
@@ -523,7 +707,8 @@ export function startAdmin({ port, host } = {}) {
       });
       server.listen(p, listenHost, () => {
         if (p !== wantPort) console.log(`  [admin] port ${wantPort} was in use — using ${p}`);
-        console.log(`  [admin] control panel at http://${listenHost}:${p}/admin`);
+        console.log(`  [admin] control panel at http://${listenHost === '0.0.0.0' ? '127.0.0.1' : listenHost}:${p}/admin`);
+        if (listenHost === '0.0.0.0') console.log('  [admin] reachable on your network — sign-in required');
         resolve(server);
       });
     };

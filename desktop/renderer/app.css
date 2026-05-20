@@ -348,3 +348,54 @@ input:focus, select:focus { outline: none; border-color: var(--accent2); }
   color: var(--dim); white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto;
 }
 .git-output:empty { display: none; }
+
+/* ── Sign-in overlay ── */
+#authOverlay {
+  position: fixed; inset: 0; z-index: 200; background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+}
+.auth-card {
+  text-align: center; padding: 40px 48px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 14px;
+}
+.auth-logo {
+  font-family: ui-monospace, Consolas, monospace; font-size: 13px; line-height: 1.25;
+  color: var(--accent); white-space: pre; margin-bottom: 10px;
+  text-shadow: 0 0 7px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.auth-title {
+  font-size: 22px; font-weight: 700; letter-spacing: 6px; color: var(--accent);
+}
+.auth-sub { color: var(--dim); font-size: 13px; margin: 6px 0 20px; }
+#authForm { display: flex; flex-direction: column; gap: 8px; width: 260px; max-width: 80vw; margin: 0 auto; }
+#authForm input { width: 100%; }
+#authForm button {
+  margin-top: 4px; width: 100%; cursor: pointer;
+  border: 1px solid var(--accent); background: var(--accent); color: var(--accent-fg);
+  border-radius: 8px; padding: 10px; font: inherit; font-weight: 600;
+}
+#authForm button:hover { filter: brightness(1.12); }
+#authForm button:disabled { opacity: .6; cursor: default; }
+.auth-or { color: var(--dimmer); font-size: 11px; margin: 14px 0 10px; }
+.auth-gbtn {
+  display: inline-flex; align-items: center; gap: 10px; cursor: pointer;
+  background: #fff; color: #1f1f1f; font: inherit; font-weight: 600; font-size: 14px;
+  padding: 11px 22px; border-radius: 8px; border: 1px solid #dadce0;
+}
+.auth-gbtn:hover { background: #f3f3f3; }
+.auth-gbtn:disabled { opacity: .6; cursor: default; }
+.auth-g {
+  display: inline-flex; width: 20px; height: 20px; border-radius: 50%;
+  background: #4285f4; color: #fff; align-items: center; justify-content: center;
+  font-weight: 700; font-family: Georgia, "Times New Roman", serif;
+}
+.auth-err { color: var(--danger); font-size: 12px; margin-top: 14px; max-width: 280px; }
+
+/* ── Signed-in user chip ── */
+#userChip {
+  width: 34px; height: 34px; margin-top: 4px; border-radius: 50%; cursor: pointer;
+  background: var(--surface-hi); border: 1px solid var(--border-hi); color: var(--accent2);
+  font: inherit; font-size: 13px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+#userChip:hover { border-color: var(--danger); color: var(--danger); }

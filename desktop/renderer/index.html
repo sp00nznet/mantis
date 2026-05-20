@@ -19,6 +19,7 @@
     <button class="rail-btn" data-section="git" title="Git">⎇</button>
     <div class="rail-spacer"></div>
     <button class="rail-btn" data-section="settings" title="Settings">⚙</button>
+    <button id="userChip" class="hidden" title="Sign out"></button>
   </nav>
 
   <!-- ── Middle list ── -->
@@ -219,6 +220,27 @@
       <button class="ghost" id="repoCancel">Cancel</button>
       <button id="repoCreateBtn">Create &amp; clone</button>
     </div>
+  </div>
+</div>
+
+<!-- ── Sign-in overlay ── -->
+<div id="authOverlay" class="hidden">
+  <div class="auth-card">
+    <pre class="auth-logo">\_/
+(o.o)
+/|_|\</pre>
+    <div class="auth-title">MANTIS</div>
+    <p class="auth-sub">Sign in to access your workspace</p>
+    <form id="authForm" autocomplete="on">
+      <input id="authUser" placeholder="Username" autocomplete="username">
+      <input id="authPass" type="password" placeholder="Password" autocomplete="current-password">
+      <button type="submit" id="authLoginBtn">Sign in</button>
+    </form>
+    <div id="authGoogleWrap" class="hidden">
+      <div class="auth-or">or</div>
+      <button id="authSignInGoogle" class="auth-gbtn"><span class="auth-g">G</span> Sign in with Google</button>
+    </div>
+    <p class="auth-err hidden" id="authErr"></p>
   </div>
 </div>
 

@@ -1,7 +1,7 @@
 import { toolDefinitions } from './tool-definitions.js';
 import { buildSystemPrompt } from './prompt.js';
 import { executeTool, getWorkingDirectory, getPlanMode } from './tools.js';
-import { getConfig, PROVIDERS } from './config.js';
+import { getConfig, PROVIDERS, buildConnection } from './config.js';
 import { shouldCompact, compactMessages, countContextTokens, getContextStats } from './context.js';
 import { classifyHttpError } from './errors.js';
 
@@ -109,12 +109,13 @@ export function createRateLimiter() {
 // Default shared rate limiter for the single-provider agent flow
 const _rateLimiter = createRateLimiter();
 
-export function createAgent() {
+export function createAgent(agentOpts = {}) {
   let messages = [];
   let initialized = false;
   let totalToolCalls = 0;
   let totalTurns = 0;
   let _cancelled = false;
+  const _prefs = agentOpts.prefs || null; // per-user provider/model/keys, or null = global config
 
   function initSystem() {
     if (!initialized) {
@@ -147,22 +148,15 @@ export function createAgent() {
 
     const config = getConfig();
 
-    // Build URL and headers based on active provider
-    const provider = PROVIDERS[config.provider] || PROVIDERS.local;
-    let url;
-    let headers = { 'Content-Type': 'application/json' };
-
-    if (config.provider === 'local') {
-      url = `${config.ollamaUrl}/v1/chat/completions`;
-    } else {
-      url = `${provider.baseUrl.replace(/\/+$/, '')}/chat/completions`;
-      const apiKey = config.providerKeys?.[config.provider];
-      if (apiKey) {
-        headers['Authorization'] = `Bearer ${apiKey}`;
-      }
+    // Resolve the LLM connection — from this agent's per-user prefs when given,
+    // otherwise from the global config.
+    const providerKey = (_prefs && _prefs.provider) || config.provider;
+    const conn = buildConnection(providerKey, _prefs && _prefs.model, _prefs);
+    if (!conn) {
+      onError(`Unknown provider: ${providerKey}`);
+      return;
     }
-
-    const model = config.model;
+    const { url, headers, provider, model } = conn;
 
     let loopCount = 0;
     const maxLoops = loopLimit || 25;

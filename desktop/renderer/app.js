@@ -1084,9 +1084,70 @@ async function doTransfer(kind) {
   if (res.ok) refreshGit();
 }
 
+// ─── sign-in ────────────────────────────────────────────────────────
+function setupAuthOverlay(status) {
+  $('authOverlay').classList.remove('hidden');
+  $('authGoogleWrap').classList.toggle('hidden', !(status && status.googleConfigured));
+  const err = $('authErr');
+  const fail = (msg) => { err.textContent = msg; err.classList.remove('hidden'); };
+
+  $('authForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = $('authLoginBtn');
+    btn.disabled = true;
+    btn.textContent = 'Signing in…';
+    err.classList.add('hidden');
+    try {
+      const r = await M.signInLocal($('authUser').value, $('authPass').value);
+      if (r && r.user) { location.reload(); return; }
+      fail((r && r.error) || 'Sign-in failed');
+    } catch (e2) {
+      fail(e2.message || 'Sign-in failed');
+    }
+    btn.disabled = false;
+    btn.textContent = 'Sign in';
+  };
+
+  $('authSignInGoogle').onclick = async () => {
+    const btn = $('authSignInGoogle');
+    btn.disabled = true;
+    btn.textContent = 'Opening Google…';
+    err.classList.add('hidden');
+    try {
+      const r = await M.signInGoogle();
+      if (r && r.user) { location.reload(); return; }
+      fail((r && r.error) || 'Sign-in failed');
+    } catch (e2) {
+      fail(e2.message || 'Sign-in failed');
+    }
+    btn.disabled = false;
+    btn.innerHTML = '<span class="auth-g">G</span> Sign in with Google';
+  };
+}
+function renderUserChip(user) {
+  const chip = $('userChip');
+  if (!user) { chip.classList.add('hidden'); return; }
+  chip.classList.remove('hidden');
+  chip.textContent = (user.name || user.email || '?').trim().slice(0, 1).toUpperCase();
+  chip.title = 'Sign out — ' + (user.email || user.name || '');
+  chip.onclick = async () => {
+    if (!confirm('Sign out of Mantis?')) return;
+    await M.signOut();
+    location.reload();
+  };
+}
+
 // ─── init ───────────────────────────────────────────────────────────
 async function init() {
+  // When Google auth is configured, a sign-in is required before the app
+  // loads. When it is not, the app runs single-user exactly as before.
+  const status = await M.authStatus();
+  if (status.authEnabled && !status.user) {
+    setupAuthOverlay(status);
+    return;
+  }
   wire();
+  renderUserChip(status.user);
   CONFIG = await M.getConfig();
   applyTheme(findTheme(CONFIG.theme));
   await loadProjects();

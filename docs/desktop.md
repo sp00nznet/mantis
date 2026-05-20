@@ -94,6 +94,14 @@ The **Git** tab connects the app to your git hosting.
 > Git operations shell out to the `git` command — it must be installed and on
 > your PATH.
 
+## Multi-user (optional)
+
+If sign-in is enabled, the desktop app shows a login screen on launch
+(username/password, plus Google if configured) and each account gets its own
+isolated history, projects, git connections, and API keys. It's off by default —
+the app opens straight to a single shared workspace. See
+[Sign-in & Multi-user](auth.md).
+
 ## Roadmap
 
 - **Phase 4** — packaged Windows installer (`.exe`) and polish.

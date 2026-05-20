@@ -13,13 +13,15 @@ import { buildChatPrompt } from '../src/prompt.js';
 
 /**
  * Run one chat turn for a session. `session.messages` holds the prior
- * conversation (no system message). Streams via callbacks.
+ * conversation (no system message). Streams via callbacks. `prefs` carries the
+ * signed-in user's provider/model/keys; null falls back to the global config.
  * @returns {Promise<{role:string,content:string}|null>}
  */
-export async function runChatTurn(session, { onText, onError, onThinking }, isCancelled) {
+export async function runChatTurn(session, { onText, onError, onThinking }, isCancelled, prefs) {
   const config = getConfig();
-  const providerKey = session.provider || config.provider;
-  const conn = buildConnection(providerKey, session.model || undefined);
+  const providerKey = session.provider || (prefs && prefs.provider) || config.provider;
+  const model = session.model || (prefs && prefs.model) || undefined;
+  const conn = buildConnection(providerKey, model, prefs);
 
   if (!conn) {
     onError(`Unknown provider: ${providerKey}`);
@@ -50,9 +52,9 @@ export async function runChatTurn(session, { onText, onError, onThinking }, isCa
  * auto-approved (there's no terminal to confirm at). Mutates session.messages.
  * @param {object} ctl - { cancelled:boolean, agent } — agent is set so it can be cancelled
  */
-export async function runAgentTurn(session, project, text, cb, ctl) {
+export async function runAgentTurn(session, project, text, cb, ctl, prefs) {
   setWorkingDirectory(project.path);
-  const agent = createAgent();
+  const agent = createAgent({ prefs });
   if (Array.isArray(session.messages) && session.messages.length) {
     agent.setMessages(session.messages);
   }
@@ -74,16 +76,18 @@ export async function runAgentTurn(session, project, text, cb, ctl) {
 }
 
 /** Fetch the model catalogue a provider exposes via /models. */
-export async function listModels(providerKey) {
+export async function listModels(providerKey, prefs) {
   const config = getConfig();
   const p = PROVIDERS[providerKey];
   if (!p) return { error: 'Unknown provider', models: [] };
 
+  const ollamaUrl = (prefs && prefs.ollamaUrl) || config.ollamaUrl;
   const base = providerKey === 'local'
-    ? `${config.ollamaUrl.replace(/\/+$/, '')}/v1`
+    ? `${ollamaUrl.replace(/\/+$/, '')}/v1`
     : p.baseUrl.replace(/\/+$/, '');
   const headers = { 'Content-Type': 'application/json' };
-  const apiKey = config.providerKeys?.[providerKey];
+  const keys = (prefs && prefs.providerKeys) || config.providerKeys || {};
+  const apiKey = keys[providerKey];
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
   try {

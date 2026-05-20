@@ -7,9 +7,14 @@
  */
 
 import { app, BrowserWindow, ipcMain, shell, safeStorage } from 'electron';
+import http from 'http';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { loadConfig, getConfig, saveConfig, PROVIDERS } from '../src/config.js';
+import { loadConfig, getConfig, saveConfig, getConfigDir, PROVIDERS } from '../src/config.js';
+import * as auth from '../src/auth.js';
+import * as users from '../src/users.js';
+import * as accounts from '../src/accounts.js';
 import * as store from './store.js';
 import * as projects from './projects.js';
 import * as git from './git.js';
@@ -17,8 +22,92 @@ import { runChatTurn, runAgentTurn, listModels } from './chat.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Loopback port the desktop OAuth redirect comes back to. Register
+// http://localhost:8790 as an authorized redirect URI in the Google client.
+const OAUTH_PORT = 8790;
+const DESKTOP_AUTH_FILE = path.join(getConfigDir(), 'desktop-auth.json');
+
 let mainWindow = null;
+let currentUser = null;            // signed-in Google user, or null
 const running = new Map(); // sessionId -> { cancelled, agent }
+
+// ─── Auth state ─────────────────────────────────────────────────────
+
+/** Bind the process to a user (or none) so per-user data dirs resolve. */
+function applyUser(user) {
+  currentUser = user || null;
+  users.setActiveUser(user ? user.userId : null);
+}
+
+/** The signed-in user's preferences, or null when running single-user. */
+function currentPrefs() {
+  return currentUser ? users.getUserPrefs(currentUser.userId) : null;
+}
+
+function readDesktopToken() {
+  try { return JSON.parse(fs.readFileSync(DESKTOP_AUTH_FILE, 'utf-8')).token || ''; }
+  catch { return ''; }
+}
+function writeDesktopToken(token) {
+  try { fs.writeFileSync(DESKTOP_AUTH_FILE, JSON.stringify({ token }), 'utf-8'); }
+  catch { /* ignore */ }
+}
+function clearDesktopToken() {
+  try { fs.unlinkSync(DESKTOP_AUTH_FILE); } catch { /* ignore */ }
+}
+
+/**
+ * Run the Google authorization-code flow: open the consent screen in a child
+ * window and catch the redirect on a one-shot loopback server.
+ * @returns {Promise<{user:object}|{error:string}>}
+ */
+function runOAuth() {
+  return new Promise((resolve) => {
+    let settled = false;
+    let gotCode = false;
+    let authWin = null;
+    const redirectUri = `http://localhost:${OAUTH_PORT}`;
+    const finish = (v) => {
+      if (settled) return;
+      settled = true;
+      try { server.close(); } catch { /* ignore */ }
+      resolve(v);
+    };
+
+    const server = http.createServer(async (req, res) => {
+      const u = new URL(req.url, redirectUri);
+      const code = u.searchParams.get('code');
+      const oerr = u.searchParams.get('error');
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end('<body style="font-family:sans-serif;background:#0d1117;color:#c9d1d9;' +
+        'text-align:center;padding:64px"><h2 style="color:#3fb950">Mantis</h2><p>' +
+        (code ? 'Signed in — you can close this window and return to Mantis.'
+              : 'Sign-in was cancelled.') + '</p></body>');
+      gotCode = true;
+      if (authWin && !authWin.isDestroyed()) authWin.close();
+      if (oerr || !code) { finish({ error: oerr || 'No authorization code was returned' }); return; }
+      finish(await auth.exchangeCode(code, redirectUri));
+    });
+
+    server.once('error', (e) => {
+      finish({ error: e.code === 'EADDRINUSE'
+        ? `Port ${OAUTH_PORT} is in use — close whatever is using it and try again`
+        : 'Could not start the sign-in listener: ' + e.message });
+    });
+
+    server.listen(OAUTH_PORT, '127.0.0.1', () => {
+      authWin = new BrowserWindow({
+        width: 520, height: 660, title: 'Sign in with Google',
+        autoHideMenuBar: true, parent: mainWindow || undefined, modal: !!mainWindow,
+        webPreferences: { nodeIntegration: false, contextIsolation: true },
+      });
+      authWin.on('closed', () => {
+        if (!gotCode) finish({ error: 'The sign-in window was closed' });
+      });
+      authWin.loadURL(auth.loginUrl(redirectUri));
+    });
+  });
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -56,6 +145,16 @@ function createWindow() {
 app.whenReady().then(() => {
   loadConfig();
   git.setSafeStorage(safeStorage);
+
+  // Restore a previous Google sign-in. When auth is not configured the app
+  // runs single-user against the legacy ~/.mantis paths, exactly as before.
+  if (auth.isAuthEnabled()) {
+    const session = auth.getSession(readDesktopToken());
+    if (session) applyUser(session);
+  } else {
+    applyUser(null);
+  }
+
   projects.ensureWorkspace();
   createWindow();
   app.on('activate', () => {
@@ -111,18 +210,68 @@ ipcMain.handle('git:commit', (_e, { projectPath, message }) => git.commit(projec
 ipcMain.handle('git:push', (_e, projectPath) => git.push(projectPath));
 ipcMain.handle('git:pull', (_e, projectPath) => git.pull(projectPath));
 
+// ─── Auth IPC ───────────────────────────────────────────────────────
+
+ipcMain.handle('auth:status', () => ({
+  authEnabled: auth.isAuthEnabled(),
+  googleConfigured: auth.isGoogleConfigured(),
+  user: currentUser ? { email: currentUser.email, name: currentUser.name } : null,
+}));
+
+ipcMain.handle('auth:signInLocal', (_e, { username, password }) => {
+  if (!auth.isAuthEnabled()) return { error: 'Sign-in is not enabled' };
+  const r = accounts.verifyLogin(username, password);
+  if (r.error) return { error: r.error };
+  const token = auth.createSession({
+    userId: r.account.id, email: r.account.email,
+    name: r.account.displayName, role: r.account.role,
+  });
+  writeDesktopToken(token);
+  applyUser(auth.getSession(token));
+  return { user: { email: r.account.email, name: r.account.displayName } };
+});
+
+ipcMain.handle('auth:signInGoogle', async () => {
+  if (!auth.isAuthEnabled()) return { error: 'Sign-in is not enabled' };
+  if (!auth.isGoogleConfigured()) return { error: 'Google sign-in is not configured' };
+  const result = await runOAuth();
+  if (result.error) return { error: result.error };
+  const resolved = accounts.resolveGoogleAccount(result.user);
+  if (resolved.error) return { error: resolved.error };
+  const acct = resolved.account;
+  const token = auth.createSession({
+    userId: acct.id, email: acct.email, name: acct.displayName,
+    picture: result.user.picture, role: acct.role,
+  });
+  writeDesktopToken(token);
+  applyUser(auth.getSession(token));
+  return { user: { email: acct.email, name: acct.displayName } };
+});
+
+ipcMain.handle('auth:signOut', () => {
+  const token = readDesktopToken();
+  if (token) auth.destroySession(token);
+  clearDesktopToken();
+  applyUser(null);
+  return { ok: true };
+});
+
 // ─── Config IPC ─────────────────────────────────────────────────────
 
 ipcMain.handle('config:get', () => {
   const c = getConfig();
+  const prefs = currentPrefs();
+  const keys = prefs ? (prefs.providerKeys || {}) : (c.providerKeys || {});
   return {
-    provider: c.provider,
-    model: c.model,
-    theme: c.adminTheme || 'mantis',
+    provider: prefs ? prefs.provider : c.provider,
+    model: prefs ? prefs.model : c.model,
+    theme: prefs ? (prefs.theme || 'mantis') : (c.adminTheme || 'mantis'),
     projectsDir: projects.workspaceRoot(),
+    authEnabled: auth.isAuthEnabled(),
+    user: currentUser ? { email: currentUser.email, name: currentUser.name } : null,
     providers: Object.entries(PROVIDERS).map(([key, p]) => ({
       key, name: p.name, requiresKey: p.requiresKey,
-      hasKey: !!c.providerKeys?.[key], defaultModel: p.defaultModel,
+      hasKey: !!keys[key], defaultModel: p.defaultModel,
     })),
   };
 });
@@ -134,34 +283,46 @@ ipcMain.handle('config:setProjectsDir', (_e, dir) => {
 });
 
 ipcMain.handle('config:setTheme', (_e, id) => {
-  saveConfig({ adminTheme: String(id || 'mantis') });
+  const theme = String(id || 'mantis');
+  if (currentUser) users.saveUserPrefs(currentUser.userId, { theme });
+  else saveConfig({ adminTheme: theme });
   return { ok: true };
 });
 
 ipcMain.handle('config:setProvider', (_e, { provider, model }) => {
   if (!PROVIDERS[provider]) return { error: 'Unknown provider' };
-  saveConfig({ provider, model: (model || '').trim() || PROVIDERS[provider].defaultModel });
+  const m = (model || '').trim() || PROVIDERS[provider].defaultModel;
+  if (currentUser) users.saveUserPrefs(currentUser.userId, { provider, model: m });
+  else saveConfig({ provider, model: m });
   return { ok: true };
 });
 
 ipcMain.handle('config:setKey', (_e, { provider, key }) => {
   if (!PROVIDERS[provider]) return { error: 'Unknown provider' };
-  const c = getConfig();
-  const keys = { ...(c.providerKeys || {}) };
-  if (key && key.trim()) keys[provider] = key.trim();
-  else delete keys[provider];
-  saveConfig({ providerKeys: keys });
+  if (currentUser) {
+    const keys = { ...(users.getUserPrefs(currentUser.userId).providerKeys || {}) };
+    if (key && key.trim()) keys[provider] = key.trim();
+    else delete keys[provider];
+    users.saveUserPrefs(currentUser.userId, { providerKeys: keys });
+  } else {
+    const keys = { ...(getConfig().providerKeys || {}) };
+    if (key && key.trim()) keys[provider] = key.trim();
+    else delete keys[provider];
+    saveConfig({ providerKeys: keys });
+  }
   return { ok: true };
 });
 
-ipcMain.handle('config:models', (_e, provider) => listModels(provider));
+ipcMain.handle('config:models', (_e, provider) => listModels(provider, currentPrefs()));
 
 // ─── Chat IPC ───────────────────────────────────────────────────────
 
 ipcMain.handle('chat:send', async (_e, { sessionId, text }) => {
+  if (auth.isAuthEnabled() && !currentUser) return { error: 'Please sign in first' };
   const session = store.get(sessionId);
   if (!session) return { error: 'No such session' };
 
+  const prefs = currentPrefs();
   const isFirstUserMsg = !session.messages.some(m => m.role === 'user');
   const ctl = { cancelled: false, agent: null };
   running.set(sessionId, ctl);
@@ -183,7 +344,7 @@ ipcMain.handle('chat:send', async (_e, { sessionId, text }) => {
         errored = true;
         cb.onError('The project for this session no longer exists.');
       } else {
-        await runAgentTurn(session, project, text, cb, ctl);
+        await runAgentTurn(session, project, text, cb, ctl, prefs);
       }
     } else {
       session.messages.push({ role: 'user', content: text });
@@ -192,7 +353,7 @@ ipcMain.handle('chat:send', async (_e, { sessionId, text }) => {
         onText: (t) => { full += t; cb.onText(t); },
         onError: (e) => { errored = true; cb.onError(e); },
         onThinking: cb.onThinking,
-      }, () => ctl.cancelled);
+      }, () => ctl.cancelled, prefs);
       if (assistant && assistant.content) full = assistant.content;
       if (full && !ctl.cancelled) session.messages.push({ role: 'assistant', content: full });
     }

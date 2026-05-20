@@ -14,6 +14,7 @@ Guides for using and understanding Mantis. New here? Start with
 
 - [Swarm Mode](swarm.md) — run every provider in parallel
 - [Proxy & Admin UI](proxy.md) — use Mantis as a Claude Code backend
+- [Sign-in & Multi-user](auth.md) — local accounts, roles, per-account workspaces
 - [Chat Bots](bots.md) — drive Mantis from Telegram or Discord
 - [Plan Mode](plan-mode.md) — read-only exploration
 - [Skills](skills.md) — built-in and custom slash commands
