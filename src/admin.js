@@ -56,6 +56,20 @@ function buildState() {
       telegram: { hasToken: !!config.bots?.telegram?.token },
       discord: { hasToken: !!config.bots?.discord?.token },
     },
+    general: {
+      ollamaUrl: config.ollamaUrl,
+      maxContextTokens: config.maxContextTokens,
+      compactThreshold: config.compactThreshold,
+      commandTimeout: config.commandTimeout,
+      maxToolResultSize: config.maxToolResultSize,
+      confirmDestructive: config.confirmDestructive,
+    },
+    swarm: {
+      maxParallelWorkers: config.swarm?.maxParallelWorkers ?? 4,
+      bestOfN: config.swarm?.bestOfN ?? 0,
+      leadProvider: config.swarm?.leadProvider ?? null,
+      excludeProviders: config.swarm?.excludeProviders ?? [],
+    },
     admin: {
       port: config.admin?.port ?? 8788,
       host: config.admin?.host ?? '127.0.0.1',
@@ -363,6 +377,49 @@ async function handleApi(req, res, url) {
     if (typeof body.telegramToken === 'string') bots.telegram.token = body.telegramToken.trim();
     if (typeof body.discordToken === 'string') bots.discord.token = body.discordToken.trim();
     saveConfig({ bots });
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (url === '/api/settings' && req.method === 'POST') {
+    const body = await readJson(req);
+    const updates = {};
+    if (typeof body.ollamaUrl === 'string' && body.ollamaUrl.trim()) {
+      updates.ollamaUrl = body.ollamaUrl.trim();
+    }
+    if (Number.isFinite(body.maxContextTokens)) {
+      updates.maxContextTokens = Math.max(1024, Math.round(body.maxContextTokens));
+    }
+    if (Number.isFinite(body.compactThreshold)) {
+      updates.compactThreshold = Math.min(0.95, Math.max(0.1, body.compactThreshold));
+    }
+    if (Number.isFinite(body.commandTimeout)) {
+      updates.commandTimeout = Math.max(1000, Math.round(body.commandTimeout));
+    }
+    if (Number.isFinite(body.maxToolResultSize)) {
+      updates.maxToolResultSize = Math.max(1000, Math.round(body.maxToolResultSize));
+    }
+    if (typeof body.confirmDestructive === 'boolean') {
+      updates.confirmDestructive = body.confirmDestructive;
+    }
+    if (body.swarm && typeof body.swarm === 'object') {
+      const swarm = { ...config.swarm };
+      if (Number.isFinite(body.swarm.maxParallelWorkers)) {
+        swarm.maxParallelWorkers = Math.min(12, Math.max(1, Math.round(body.swarm.maxParallelWorkers)));
+      }
+      if (Number.isFinite(body.swarm.bestOfN)) {
+        const n = Math.round(body.swarm.bestOfN);
+        swarm.bestOfN = [0, 2, 3].includes(n) ? n : 0;
+      }
+      if ('leadProvider' in body.swarm) {
+        swarm.leadProvider = body.swarm.leadProvider && PROVIDERS[body.swarm.leadProvider]
+          ? body.swarm.leadProvider : null;
+      }
+      if (Array.isArray(body.swarm.excludeProviders)) {
+        swarm.excludeProviders = body.swarm.excludeProviders.filter(k => PROVIDERS[k]);
+      }
+      updates.swarm = swarm;
+    }
+    saveConfig(updates);
     return sendJson(res, 200, { ok: true });
   }
 

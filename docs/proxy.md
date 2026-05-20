@@ -127,13 +127,16 @@ It's also mounted on the proxy — when `mantis serve` is running, open
 `http://127.0.0.1:8787/admin`. From the REPL, `/admin` starts the standalone
 server.
 
-The panel has a left-nav layout with four sections:
+The panel has a left-nav layout and opens on **Sessions**:
 
+- **Sessions** — live agent terminals (see below)
 - **Providers** — set the active provider/model; add, **test**, or **delete**
   API keys for any provider
 - **Proxy** — tier routing and the probe toggle
 - **Bots** — Telegram / Discord tokens
-- **Sessions** — live agent terminals (see below)
+- **Settings** — general config (Ollama URL, context window, compaction
+  threshold, timeouts) and swarm settings (lead provider, parallel workers,
+  best-of-N, and the provider pool)
 
 Access is restricted to `localhost` — requests from any other address get a
 `403`.

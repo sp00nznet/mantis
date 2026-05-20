@@ -98,6 +98,11 @@
   .hint { color: #6e7681; font-size: 11px; margin-top: 8px; }
   .check { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
   .check input { width: auto; }
+  .pool-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 4px 14px; margin-top: 6px; }
+  .pool-grid label { display: flex; align-items: center; gap: 6px; margin: 0;
+    color: #c9d1d9; font-size: 12px; }
+  .pool-grid input { width: auto; }
 
   /* ── Sessions ── */
   #sessChips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
@@ -169,17 +174,18 @@
       <small>admin panel</small>
     </div>
     <nav>
-      <a data-view="providers" class="active">Providers</a>
+      <a data-view="sessions" class="active">Sessions <span class="count" id="navSessCount">0</span></a>
+      <a data-view="providers">Providers</a>
       <a data-view="proxy">Proxy</a>
       <a data-view="bots">Bots</a>
-      <a data-view="sessions">Sessions <span class="count" id="navSessCount">0</span></a>
+      <a data-view="settings">Settings</a>
     </nav>
     <div class="side-foot" id="sideFoot">connecting…</div>
   </aside>
 
   <main id="main">
     <!-- ── Providers ── -->
-    <div class="view active" id="view-providers">
+    <div class="view" id="view-providers">
       <div class="view-head"><h1>Providers</h1></div>
       <section class="card">
         <h2>Active provider</h2>
@@ -233,7 +239,7 @@
     </div>
 
     <!-- ── Sessions ── -->
-    <div class="view" id="view-sessions">
+    <div class="view active" id="view-sessions">
       <div class="view-head">
         <h1>Sessions</h1>
         <div class="spacer"></div>
@@ -257,6 +263,41 @@
       <div id="sessChips"></div>
       <div id="sessSingle"></div>
       <div id="sessGrid" hidden></div>
+    </div>
+
+    <!-- ── Settings ── -->
+    <div class="view" id="view-settings">
+      <div class="view-head"><h1>Settings</h1></div>
+      <section class="card">
+        <h2>General</h2>
+        <label>Ollama URL</label>
+        <input id="setOllamaUrl" placeholder="http://localhost:11434">
+        <div class="row">
+          <div><label>Max context tokens</label><input id="setMaxContext" type="number"></div>
+          <div><label>Compact threshold (0.1–0.95)</label><input id="setCompact" type="number" step="0.05"></div>
+        </div>
+        <div class="row">
+          <div><label>Command timeout (ms)</label><input id="setCmdTimeout" type="number"></div>
+          <div><label>Max tool result (chars)</label><input id="setMaxToolResult" type="number"></div>
+        </div>
+        <div class="check">
+          <input type="checkbox" id="setConfirmDestructive">
+          <label for="setConfirmDestructive" style="margin:0">Confirm destructive operations</label>
+        </div>
+      </section>
+      <section class="card">
+        <h2>Swarm</h2>
+        <div class="row">
+          <div><label>Lead provider</label><select id="setLead"></select></div>
+          <div><label>Max parallel workers</label><input id="setWorkers" type="number"></div>
+          <div><label>Best-of-N</label><select id="setBestOfN">
+            <option value="0">Off</option><option value="2">2 providers</option><option value="3">3 providers</option>
+          </select></div>
+        </div>
+        <label>Swarm pool — unchecked providers are excluded</label>
+        <div id="setPool" class="pool-grid"></div>
+      </section>
+      <div class="row"><div></div><button onclick="saveSettings()">Save settings</button></div>
     </div>
   </main>
 </div>
@@ -379,6 +420,32 @@ function renderConfig() {
   document.getElementById('telegramToken').placeholder = STATE.bots.telegram.hasToken ? 'set — type to replace' : '(not set)';
   document.getElementById('discordToken').placeholder = STATE.bots.discord.hasToken ? 'set — type to replace' : '(not set)';
 
+  // Settings panel
+  var g = STATE.general || {};
+  setVal('setOllamaUrl', g.ollamaUrl);
+  setVal('setMaxContext', g.maxContextTokens);
+  setVal('setCompact', g.compactThreshold);
+  setVal('setCmdTimeout', g.commandTimeout);
+  setVal('setMaxToolResult', g.maxToolResultSize);
+  document.getElementById('setConfirmDestructive').checked = !!g.confirmDestructive;
+  var sw = STATE.swarm || {};
+  var leadOpts = '<option value="">(auto-select)</option>';
+  STATE.providers.forEach(function(p){
+    leadOpts += '<option value="' + p.key + '"' + (p.key === sw.leadProvider ? ' selected' : '') +
+      '>' + p.name + '</option>';
+  });
+  document.getElementById('setLead').innerHTML = leadOpts;
+  setVal('setWorkers', sw.maxParallelWorkers);
+  document.getElementById('setBestOfN').value = String(sw.bestOfN || 0);
+  var excl = sw.excludeProviders || [];
+  var pool = '';
+  STATE.providers.forEach(function(p){
+    var on = excl.indexOf(p.key) === -1;
+    pool += '<label><input type="checkbox" data-pk="' + p.key + '"' + (on ? ' checked' : '') +
+      '> ' + p.key + '</label>';
+  });
+  document.getElementById('setPool').innerHTML = pool;
+
   document.getElementById('sideFoot').innerHTML =
     '<span class="dot">●</span> ' + STATE.activeProvider + '<br>' +
     '<span class="dot">●</span> proxy :' + STATE.proxy.port;
@@ -426,6 +493,30 @@ function saveBots() {
   if (tg) p.telegramToken = tg;
   if (dc) p.discordToken = dc;
   api('POST','/api/bots', p).then(function(r){ done(r, 'Bot tokens saved'); });
+}
+function setVal(id, v) {
+  var e = document.getElementById(id);
+  if (e) e.value = (v === null || v === undefined) ? '' : v;
+}
+function saveSettings() {
+  var exclude = [];
+  document.querySelectorAll('#setPool input[type=checkbox]').forEach(function(cb){
+    if (!cb.checked) exclude.push(cb.getAttribute('data-pk'));
+  });
+  api('POST','/api/settings', {
+    ollamaUrl: document.getElementById('setOllamaUrl').value.trim(),
+    maxContextTokens: parseInt(document.getElementById('setMaxContext').value, 10),
+    compactThreshold: parseFloat(document.getElementById('setCompact').value),
+    commandTimeout: parseInt(document.getElementById('setCmdTimeout').value, 10),
+    maxToolResultSize: parseInt(document.getElementById('setMaxToolResult').value, 10),
+    confirmDestructive: document.getElementById('setConfirmDestructive').checked,
+    swarm: {
+      leadProvider: document.getElementById('setLead').value || null,
+      maxParallelWorkers: parseInt(document.getElementById('setWorkers').value, 10),
+      bestOfN: parseInt(document.getElementById('setBestOfN').value, 10),
+      excludeProviders: exclude
+    }
+  }).then(function(r){ done(r, 'Settings saved'); });
 }
 function done(r, msg) {
   if (r && r.ok) { toast(msg); loadState(); }
@@ -746,6 +837,7 @@ setInterval(function(){
 }, 3000);
 
 loadState();
+showView('sessions');
 </script>
 </body>
 </html>
