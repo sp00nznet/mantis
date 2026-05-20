@@ -103,6 +103,35 @@ async function testProvider(providerKey) {
   }
 }
 
+/** Fetch the model catalogue a provider exposes via /models. */
+async function listModels(providerKey) {
+  const config = getConfig();
+  const p = PROVIDERS[providerKey];
+  if (!p) return { error: 'Unknown provider', models: [] };
+
+  const base = providerKey === 'local'
+    ? `${config.ollamaUrl.replace(/\/+$/, '')}/v1`
+    : p.baseUrl.replace(/\/+$/, '');
+  const headers = { 'Content-Type': 'application/json' };
+  const apiKey = config.providerKeys?.[providerKey];
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+  try {
+    const r = await fetch(`${base}/models`, { headers, signal: AbortSignal.timeout(12000) });
+    if (!r.ok) {
+      return { error: r.status === 401 ? 'unauthorized — check the API key' : `HTTP ${r.status}`, models: [] };
+    }
+    const data = await r.json();
+    const models = (Array.isArray(data.data) ? data.data : [])
+      .map(m => (typeof m === 'string' ? m : m && m.id))
+      .filter(Boolean)
+      .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+    return { models };
+  } catch (err) {
+    return { error: err.message, models: [] };
+  }
+}
+
 // ─── HTTP helpers ───────────────────────────────────────────────────
 
 function sendJson(res, status, obj) {
@@ -335,6 +364,11 @@ async function handleApi(req, res, url) {
     if (typeof body.discordToken === 'string') bots.discord.token = body.discordToken.trim();
     saveConfig({ bots });
     return sendJson(res, 200, { ok: true });
+  }
+
+  if (url.startsWith('/api/provider/models') && req.method === 'GET') {
+    const provider = new URL(req.url, 'http://x').searchParams.get('provider');
+    return sendJson(res, 200, await listModels(provider));
   }
 
   if (url.startsWith('/api/provider/test') && req.method === 'GET') {

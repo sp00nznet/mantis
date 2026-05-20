@@ -8,6 +8,8 @@
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  /* the hidden attribute must win over display rules like .modal/#sessGrid */
+  [hidden] { display: none !important; }
   body {
     font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     background: #0d1117; color: #c9d1d9; height: 100vh; overflow: hidden;
@@ -164,9 +166,11 @@
         <h2>Active provider</h2>
         <div class="row">
           <div><label>Provider</label><select id="activeProvider"></select></div>
-          <div><label>Model</label><input id="activeModel" placeholder="model id"></div>
+          <div><label>Model</label><select id="activeModel" onchange="onModelSelect(this)"></select></div>
+          <button class="alt" title="Refresh model list" onclick="refreshActiveModels()">⟳</button>
           <button onclick="saveActive()">Save</button>
         </div>
+        <div class="hint">The model list is polled live from the provider. Pick "✎ Custom model…" to type one in.</div>
       </section>
       <section class="card">
         <h2>API keys</h2>
@@ -300,6 +304,7 @@ function showView(name) {
   });
   document.getElementById('main').classList.toggle('no-pad', false);
   if (name === 'sessions') { loadSessions(); }
+  if (name === 'proxy') { loadRouteModels(); }
 }
 
 // ── Providers / Proxy / Bots ──
@@ -311,8 +316,13 @@ function providerOptions(sel, blank) {
   return h;
 }
 function renderConfig() {
-  document.getElementById('activeProvider').innerHTML = providerOptions(STATE.activeProvider, false);
-  document.getElementById('activeModel').value = STATE.activeModel || '';
+  var ap = document.getElementById('activeProvider');
+  ap.innerHTML = providerOptions(STATE.activeProvider, false);
+  ap.onchange = function(){
+    var prov = STATE.providers.filter(function(p){ return p.key === ap.value; })[0] || {};
+    fillModelSelect(document.getElementById('activeModel'), ap.value, prov.defaultModel || '', false);
+  };
+  fillModelSelect(document.getElementById('activeModel'), STATE.activeProvider, STATE.activeModel, false);
 
   var rows = '';
   STATE.providers.forEach(function(p){
@@ -333,10 +343,17 @@ function renderConfig() {
   TIERS.forEach(function(t){
     var r = (STATE.proxy.routes || {})[t] || {};
     grid += '<label style="text-transform:capitalize">' + t + '</label>' +
-      '<select id="route_' + t + '_p">' + providerOptions(r.provider, true) + '</select>' +
-      '<input id="route_' + t + '_m" placeholder="(default)" value="' + (r.model || '') + '">';
+      '<select id="route_' + t + '_p" onchange="onRouteProviderChange(\'' + t + '\')">' +
+        providerOptions(r.provider, true) + '</select>' +
+      '<select id="route_' + t + '_m" onchange="onModelSelect(this)"></select>';
   });
   document.getElementById('routeGrid').innerHTML = grid;
+  // seed each route's model select with its saved value — the Proxy view
+  // loads the full polled lists when it opens.
+  TIERS.forEach(function(t){
+    var r = (STATE.proxy.routes || {})[t] || {};
+    buildModelOptions(document.getElementById('route_' + t + '_m'), [], r.model || '', true);
+  });
   document.getElementById('answerProbes').checked = STATE.proxy.answerProbes;
   document.getElementById('proxyPort').value = STATE.proxy.port;
   document.getElementById('proxyHost').value = STATE.proxy.host;
@@ -350,9 +367,11 @@ function renderConfig() {
 function loadState() { return api('GET','/api/state').then(function(s){ STATE = s; renderConfig(); }); }
 
 function saveActive() {
+  var model = document.getElementById('activeModel').value;
+  if (model === '__custom__' || !model) { toast('Pick a model first', true); return; }
   api('POST','/api/provider/active', {
     provider: document.getElementById('activeProvider').value,
-    model: document.getElementById('activeModel').value
+    model: model
   }).then(function(r){ done(r, 'Active provider saved'); });
 }
 function saveKey(k) {
@@ -370,8 +389,9 @@ function testProvider(k) {
 function saveProxy() {
   var routes = {};
   TIERS.forEach(function(t){
-    routes[t] = { provider: document.getElementById('route_'+t+'_p').value,
-                  model: document.getElementById('route_'+t+'_m').value };
+    var m = document.getElementById('route_'+t+'_m').value;
+    if (m === '__custom__') m = '';
+    routes[t] = { provider: document.getElementById('route_'+t+'_p').value, model: m };
   });
   api('POST','/api/proxy', {
     routes: routes,
@@ -391,6 +411,78 @@ function saveBots() {
 function done(r, msg) {
   if (r && r.ok) { toast(msg); loadState(); }
   else toast((r && r.error) || 'Failed', true);
+}
+
+// ── Model selectors (polled live from each provider) ──
+var MODEL_CACHE = {}; // providerKey -> { models, error }
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fetchModels(pk, force) {
+  if (!pk) return Promise.resolve({ models: [] });
+  if (!force && MODEL_CACHE[pk]) return Promise.resolve(MODEL_CACHE[pk]);
+  return fetch('/api/provider/models?provider=' + encodeURIComponent(pk))
+    .then(function(r){ return r.json(); })
+    .then(function(d){ MODEL_CACHE[pk] = d; return d; })
+    .catch(function(){ var d = { models: [], error: 'request failed' }; MODEL_CACHE[pk] = d; return d; });
+}
+function buildModelOptions(sel, models, current, withBlank) {
+  if (!sel) return;
+  var html = '';
+  if (withBlank) html += '<option value=""' + (current ? '' : ' selected') + '>(provider default)</option>';
+  var all = (models || []).slice();
+  if (current && all.indexOf(current) === -1) all.unshift(current);
+  all.forEach(function(m){
+    html += '<option value="' + esc(m) + '"' + (m === current ? ' selected' : '') + '>' + esc(m) + '</option>';
+  });
+  html += '<option value="__custom__">✎ Custom model…</option>';
+  sel.innerHTML = html;
+}
+function fillModelSelect(sel, pk, current, withBlank, force) {
+  if (!sel) return Promise.resolve();
+  // keep the current value live while loading so a quick save still works
+  sel.innerHTML = '<option value="' + esc(current || '') + '">loading models…</option>';
+  sel.disabled = true;
+  return fetchModels(pk, force).then(function(d){
+    buildModelOptions(sel, d.models, current, withBlank);
+    sel.disabled = false;
+    if (d.error) toast(pk + ' models: ' + d.error, true);
+  });
+}
+function onModelSelect(sel) {
+  if (sel.value !== '__custom__') { sel._last = sel.value; return; }
+  var v = prompt('Enter a model id:');
+  if (v && v.trim()) {
+    v = v.trim();
+    var found = false;
+    for (var i = 0; i < sel.options.length; i++) if (sel.options[i].value === v) found = true;
+    if (!found) {
+      var o = document.createElement('option');
+      o.value = v; o.textContent = v;
+      sel.insertBefore(o, sel.options[sel.options.length - 1]);
+    }
+    sel.value = v;
+  } else {
+    sel.value = sel._last || '';
+  }
+}
+function refreshActiveModels() {
+  var pk = document.getElementById('activeProvider').value;
+  var cur = document.getElementById('activeModel').value;
+  fillModelSelect(document.getElementById('activeModel'), pk, cur === '__custom__' ? '' : cur, false, true);
+}
+function routeProviderFor(t) {
+  return document.getElementById('route_' + t + '_p').value || STATE.activeProvider;
+}
+function onRouteProviderChange(t) {
+  fillModelSelect(document.getElementById('route_' + t + '_m'), routeProviderFor(t), '', true);
+}
+function loadRouteModels() {
+  if (!STATE) return;
+  TIERS.forEach(function(t){
+    var cur = ((STATE.proxy.routes || {})[t] || {}).model || '';
+    fillModelSelect(document.getElementById('route_' + t + '_m'), routeProviderFor(t), cur, true);
+  });
 }
 
 // ── Sessions ──
