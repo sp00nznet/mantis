@@ -118,6 +118,7 @@ ipcMain.handle('config:get', () => {
   return {
     provider: c.provider,
     model: c.model,
+    theme: c.adminTheme || 'mantis',
     projectsDir: projects.workspaceRoot(),
     providers: Object.entries(PROVIDERS).map(([key, p]) => ({
       key, name: p.name, requiresKey: p.requiresKey,
@@ -129,6 +130,11 @@ ipcMain.handle('config:get', () => {
 ipcMain.handle('config:setProjectsDir', (_e, dir) => {
   saveConfig({ projectsDir: (dir || '').trim() });
   projects.ensureWorkspace();
+  return { ok: true };
+});
+
+ipcMain.handle('config:setTheme', (_e, id) => {
+  saveConfig({ adminTheme: String(id || 'mantis') });
   return { ok: true };
 });
 

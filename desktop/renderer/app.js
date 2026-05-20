@@ -69,6 +69,130 @@ function timeAgo(ts) {
   return Math.floor(d / 86400000) + 'd ago';
 }
 
+// ─── themes ─────────────────────────────────────────────────────────
+function hsl2hex(h, s, l) {
+  s /= 100; l /= 100;
+  const k = (n) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n) => {
+    const v = l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return ('0' + Math.round(255 * v).toString(16)).slice(-2);
+  };
+  return '#' + f(0) + f(8) + f(4);
+}
+function hexRgb(h) {
+  h = h.replace('#', '');
+  return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
+}
+function mix(c1, c2, t) {
+  const a = hexRgb(c1), b = hexRgb(c2);
+  const f = (x) => ('0' + Math.round(x).toString(16)).slice(-2);
+  return '#' + f(a[0]+(b[0]-a[0])*t) + f(a[1]+(b[1]-a[1])*t) + f(a[2]+(b[2]-a[2])*t);
+}
+function lum(hex) { const c = hexRgb(hex); return (0.299*c[0]+0.587*c[1]+0.114*c[2])/255; }
+function themeSlug(s) { return s.toLowerCase().replace(/[^a-z0-9]+/g, '-'); }
+function expandTheme(t) {
+  const bg = t.bg, W = '#ffffff', K = '#000000';
+  const af = lum(t.accent) > 0.62 ? '#10141a' : '#ffffff';
+  if (t.light) {
+    return {
+      '--bg': bg, '--bg-dark': mix(bg,K,.05), '--surface': '#ffffff',
+      '--surface-hi': mix(bg,K,.06), '--border': mix(bg,K,.14), '--border-hi': mix(bg,K,.24),
+      '--text': mix(bg,K,.82), '--dim': mix(bg,K,.46), '--dimmer': mix(bg,K,.34),
+      '--accent': t.accent, '--accent-fg': af, '--accent2': t.accent2, '--danger': '#d1242f',
+    };
+  }
+  return {
+    '--bg': bg, '--bg-dark': mix(bg,K,.4), '--surface': mix(bg,W,.055),
+    '--surface-hi': mix(bg,W,.12), '--border': mix(bg,W,.1), '--border-hi': mix(bg,W,.2),
+    '--text': mix(bg,W,.84), '--dim': mix(bg,W,.52), '--dimmer': mix(bg,W,.38),
+    '--accent': t.accent, '--accent-fg': af, '--accent2': t.accent2, '--danger': '#f85149',
+  };
+}
+function buildThemes() {
+  const named = [
+    ['Mantis','#0d1117','#3fb950','#58a6ff',0,1],
+    ['Dracula','#282a36','#bd93f9','#ff79c6',0,0],
+    ['Nord','#2e3440','#88c0d0','#a3be8c',0,0],
+    ['Tokyo Night','#1a1b26','#7aa2f7','#bb9af7',0,0],
+    ['One Dark','#282c34','#61afef','#c678dd',0,0],
+    ['Monokai','#272822','#a6e22e','#fd971f',0,0],
+    ['Gruvbox','#282828','#fabd2f','#fe8019',0,0],
+    ['Solarized','#002b36','#2aa198','#cb4b16',0,0],
+    ['Catppuccin','#1e1e2e','#a6e3a1','#89b4fa',0,0],
+    ['Ayu Dark','#0b0e14','#ffb454','#59c2ff',0,0],
+    ['Night Owl','#011627','#22da6e','#82aaff',0,0],
+    ['Synthwave','#241b2f','#ff7edb','#36f9f6',0,1],
+    ['Matrix','#0a0f0a','#00ff5f','#1f9b4e',0,1],
+    ['Cobalt','#16263a','#ffc600','#33d17a',0,0],
+    ['Hacker','#0a0e0a','#3fb950','#2ea043',0,1],
+    ['Amber CRT','#160f00','#ffb000','#ff7a00',0,0],
+    ['Tokyo Storm','#24283b','#7aa2f7','#9ece6a',0,0],
+    ['Rose Pine','#191724','#ebbcba','#9ccfd8',0,0],
+    ['Everforest','#2d353b','#a7c080','#7fbbb3',0,1],
+    ['Carbon','#161616','#42be65','#78a9ff',0,0],
+    ['Oceanic','#1b2b34','#6699cc','#5fb3b3',0,0],
+    ['Palenight','#292d3e','#c792ea','#82aaff',0,0],
+    ['Deep Ocean','#0f111a','#84ffff','#c792ea',0,0],
+    ['Vampire','#1a0e10','#ff5277','#ffb86c',0,0],
+    ['GitHub Light','#ffffff','#1a7f37','#0969da',1,0],
+    ['Solarized Light','#fdf6e3','#268bd2','#cb4b16',1,0],
+    ['One Light','#fafafa','#4078f2','#a626a4',1,0],
+    ['Paper','#f4ecd8','#8a6d3b','#9a3b2e',1,0],
+  ];
+  const list = named.map(t => ({
+    id: themeSlug(t[0]), name: t[0], bg: t[1], accent: t[2], accent2: t[3],
+    light: !!t[4], bgImg: !!t[5],
+  }));
+  const hn = ['Crimson','Ember','Amber','Gold','Citrus','Lime','Fern','Emerald','Jade',
+    'Teal','Aqua','Cyan','Sky','Azure','Cobalt','Indigo','Violet','Orchid'];
+  const hu = [350,16,34,46,64,84,110,140,158,175,188,196,205,215,226,245,270,300];
+  hn.forEach((nm, i) => {
+    const h = hu[i];
+    list.push({ id: themeSlug('nocturne-'+nm), name: 'Nocturne ' + nm, light: false, bgImg: false,
+      bg: hsl2hex(h,16,9), accent: hsl2hex(h,68,62), accent2: hsl2hex((h+50)%360,52,64) });
+  });
+  hn.forEach((nm, i) => {
+    const h = hu[i];
+    list.push({ id: themeSlug('daybreak-'+nm), name: 'Daybreak ' + nm, light: true, bgImg: false,
+      bg: hsl2hex(h,34,96), accent: hsl2hex(h,56,42), accent2: hsl2hex((h+50)%360,48,46) });
+  });
+  return list;
+}
+const THEMES = buildThemes();
+let CURRENT_THEME = 'mantis';
+function findTheme(id) { return THEMES.find(t => t.id === id) || THEMES[0]; }
+function applyTheme(t) {
+  if (!t) return;
+  const ex = expandTheme(t), r = document.documentElement.style;
+  for (const k in ex) r.setProperty(k, ex[k]);
+  r.setProperty('color-scheme', t.light ? 'light' : 'dark');
+  document.body.classList.toggle('has-bg', !!t.bgImg);
+  CURRENT_THEME = t.id;
+}
+function renderThemePicker() {
+  const grid = $('themeGrid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  THEMES.forEach(t => {
+    const sw = document.createElement('div');
+    sw.className = 'swatch' + (t.id === CURRENT_THEME ? ' sel' : '');
+    sw.innerHTML =
+      '<div class="sw-prev" style="background:' + t.bg + '">' +
+        '<span class="sw-dot" style="background:' + t.accent + '"></span>' +
+        '<span class="sw-dot" style="background:' + t.accent2 + '"></span>' +
+        (t.bgImg ? '<span style="font-size:12px">🐜</span>' : '') +
+      '</div><div class="sw-name">' + escapeHtml(t.name) + '</div>';
+    sw.onclick = () => selectTheme(t.id);
+    grid.appendChild(sw);
+  });
+}
+function selectTheme(id) {
+  applyTheme(findTheme(id));
+  renderThemePicker();
+  M.setTheme(id);
+}
+
 // ─── views ──────────────────────────────────────────────────────────
 function show(view) {
   ['chatView', 'filesView', 'reposView', 'gitView', 'settingsView', 'placeholderView'].forEach(v => {
@@ -81,8 +205,11 @@ function placeholder(emoji, title, body) {
   show('placeholderView');
 }
 function showWelcome() {
-  placeholder('🦗', 'Start a conversation',
-    'Click <b>+ New</b> to begin a chat, or pick one from your history.');
+  $('placeholderBody').innerHTML =
+    '<img class="welcome-img" src="assets/mantis-bg.png" alt="">' +
+    '<h2>Start a conversation</h2>' +
+    '<p>Click <b>+ New</b> to begin a chat, or pick one from your history.</p>';
+  show('placeholderView');
 }
 function showPickProject() {
   placeholder('📁', 'Projects',
@@ -520,6 +647,7 @@ async function renderSettings() {
   ps.onchange = () => { fillModels(ps.value, ''); updateKeyLabel(); };
   updateKeyLabel();
   $('setProjectsDir').value = CONFIG.projectsDir || '';
+  renderThemePicker();
   await fillModels(CONFIG.provider, CONFIG.model);
 }
 function updateKeyLabel() {
@@ -960,6 +1088,7 @@ async function doTransfer(kind) {
 async function init() {
   wire();
   CONFIG = await M.getConfig();
+  applyTheme(findTheme(CONFIG.theme));
   await loadProjects();
   await loadConnections();
   await loadSessions();
