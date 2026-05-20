@@ -187,6 +187,7 @@ const DEFAULTS = {
   provider: 'local',        // active provider key
   providerKeys: {},          // { together: 'key...', groq: 'key...' }
   projectsDir: '',           // desktop app: where new projects & clones go ('' = ~/MantisProjects)
+  adminTheme: 'mantis',      // admin panel colour theme id
   swarm: {
     leadProvider: null,       // null = auto-select, or 'groq', 'claude', etc.
     maxParallelWorkers: 4,    // cap parallel exploration workers

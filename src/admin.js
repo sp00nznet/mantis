@@ -20,7 +20,9 @@ import {
   listSessions, getSession, createWebSession, removeSession, sendInput, stopSession,
 } from './sessions.js';
 
-const HTML_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'admin.html');
+const ADMIN_DIR = path.dirname(fileURLToPath(import.meta.url));
+const HTML_PATH = path.join(ADMIN_DIR, 'admin.html');
+const ASSETS_DIR = path.join(ADMIN_DIR, 'assets');
 
 // ─── Loopback guard ─────────────────────────────────────────────────
 
@@ -44,6 +46,7 @@ function buildState() {
   return {
     activeProvider: config.provider,
     activeModel: config.model,
+    theme: config.adminTheme || 'mantis',
     cwd: getWorkingDirectory(),
     providers,
     proxy: {
@@ -325,6 +328,12 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, buildState());
   }
 
+  if (url === '/api/theme' && req.method === 'POST') {
+    const body = await readJson(req);
+    if (body.id) saveConfig({ adminTheme: String(body.id) });
+    return sendJson(res, 200, { ok: true });
+  }
+
   if (url === '/api/provider/key' && req.method === 'POST') {
     const body = await readJson(req);
     if (!body.provider || !PROVIDERS[body.provider]) {
@@ -438,6 +447,19 @@ async function handleApi(req, res, url) {
 
 // ─── Request entrypoint ─────────────────────────────────────────────
 
+function serveStatic(res, url) {
+  const name = url === '/favicon.ico' ? 'favicon.ico' : path.basename(url);
+  const file = path.join(ASSETS_DIR, name);
+  if (!file.startsWith(ASSETS_DIR)) { res.writeHead(403); res.end(); return; }
+  let data;
+  try { data = fs.readFileSync(file); }
+  catch { res.writeHead(404); res.end('Not found\n'); return; }
+  const ct = name.endsWith('.ico') ? 'image/x-icon'
+    : name.endsWith('.png') ? 'image/png' : 'application/octet-stream';
+  res.writeHead(200, { 'Content-Type': ct, 'Cache-Control': 'max-age=86400' });
+  res.end(data);
+}
+
 export async function handleAdminRequest(req, res) {
   if (!isLoopback(req)) {
     res.writeHead(403, { 'Content-Type': 'text/plain' });
@@ -450,6 +472,9 @@ export async function handleAdminRequest(req, res) {
   try {
     if (url.startsWith('/api/')) {
       return await handleApi(req, res, url);
+    }
+    if (url === '/favicon.ico' || url.startsWith('/assets/')) {
+      return serveStatic(res, url);
     }
     if (url === '/admin' || url === '/admin/' || url === '/') {
       let html;

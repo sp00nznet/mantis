@@ -28,6 +28,7 @@ function createWindow() {
     minHeight: 580,
     backgroundColor: '#0d1117',
     title: 'Mantis',
+    icon: path.join(__dirname, 'assets', 'icon.png'),
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
