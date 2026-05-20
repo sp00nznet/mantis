@@ -21,8 +21,18 @@
     width: 212px; flex: 0 0 212px; background: #0a0e14;
     border-right: 1px solid #21262d; display: flex; flex-direction: column;
   }
-  .brand { padding: 18px 20px; font-size: 16px; font-weight: 700; color: #3fb950; }
-  .brand small { display: block; color: #6e7681; font-size: 11px; font-weight: 400; }
+  .brand { padding: 16px 12px 14px; border-bottom: 1px solid #21262d; text-align: center; }
+  .mascot {
+    display: inline-block; text-align: left; margin: 0 0 7px;
+    color: #3fb950; font-family: inherit; font-size: 10px; line-height: 1.2;
+    white-space: pre; text-shadow: 0 0 5px rgba(63,185,80,.6);
+  }
+  .wordmark {
+    color: #3fb950; font-weight: 700; font-size: 15px; letter-spacing: 5px;
+    padding-left: 5px; text-shadow: 0 0 7px rgba(63,185,80,.55);
+  }
+  .brand small { display: block; color: #6e7681; font-size: 10px;
+    letter-spacing: 2px; margin-top: 3px; }
   nav { padding: 8px; flex: 1; }
   nav a {
     display: flex; align-items: center; gap: 8px; padding: 9px 12px; margin: 2px 0;
@@ -148,7 +158,16 @@
 <body>
 <div id="app">
   <aside id="sidebar">
-    <div class="brand">🦗 Mantis<small>admin panel</small></div>
+    <div class="brand">
+      <pre class="mascot">   \_/
+  (o.o)
+  /|_|\
+ // | \\
+   /=\
+  /   \</pre>
+      <div class="wordmark">MANTIS</div>
+      <small>admin panel</small>
+    </div>
     <nav>
       <a data-view="providers" class="active">Providers</a>
       <a data-view="proxy">Proxy</a>

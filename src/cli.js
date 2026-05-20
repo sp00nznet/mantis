@@ -68,10 +68,10 @@ export async function startCLI() {
   const mascotRaw = [
     '   \\_/    ',
     '  (o.o)   ',
-    ' _/|\\_    ',
-    '/ / \\ \\   ',
-    '  / \\     ',
-    ' /   \\    ',
+    '  /|_|\\   ',
+    ' // | \\\\  ',
+    '   /=\\    ',
+    '  /   \\   ',
   ];
   const info = [
     chalk.green.bold('MANTIS'),
