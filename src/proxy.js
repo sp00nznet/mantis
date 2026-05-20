@@ -614,22 +614,35 @@ async function handleRequest(req, res) {
 export function startProxy({ port, host } = {}) {
   const config = getConfig();
   const P = config.proxy || {};
-  const listenPort = port || P.port || 8787;
+  const wantPort = port || P.port || 8787;
   const listenHost = host || P.host || '127.0.0.1';
 
   return new Promise((resolve, reject) => {
-    const server = http.createServer((req, res) => {
-      handleRequest(req, res).catch((err) => {
-        try { sendError(res, 500, 'api_error', err.message); } catch { /* ignore */ }
+    let p = wantPort;
+    const attempt = () => {
+      const server = http.createServer((req, res) => {
+        handleRequest(req, res).catch((err) => {
+          try { sendError(res, 500, 'api_error', err.message); } catch { /* ignore */ }
+        });
       });
-    });
-    server.on('error', reject);
-    server.listen(listenPort, listenHost, () => {
-      const base = `http://${listenHost}:${listenPort}`;
-      log(`listening on ${base}`);
-      log(`point a client at it:  ANTHROPIC_BASE_URL=${base}`);
-      log(`admin UI: ${base}/admin`);
-      resolve(server);
-    });
+      // If the port is busy, fall back to the next one.
+      server.once('error', (err) => {
+        if (err.code === 'EADDRINUSE' && p < wantPort + 12) {
+          p += 1;
+          attempt();
+        } else {
+          reject(err);
+        }
+      });
+      server.listen(p, listenHost, () => {
+        const base = `http://${listenHost}:${p}`;
+        if (p !== wantPort) log(`port ${wantPort} was in use — using ${p}`);
+        log(`listening on ${base}`);
+        log(`point a client at it:  ANTHROPIC_BASE_URL=${base}`);
+        log(`admin UI: ${base}/admin`);
+        resolve(server);
+      });
+    };
+    attempt();
   });
 }

@@ -502,18 +502,31 @@ export async function handleAdminRequest(req, res) {
  */
 export function startAdmin({ port, host } = {}) {
   const config = getConfig();
-  const listenPort = port || config.admin?.port || 8788;
+  const wantPort = port || config.admin?.port || 8788;
   const listenHost = host || config.admin?.host || '127.0.0.1';
   return new Promise((resolve, reject) => {
-    const server = http.createServer((req, res) => {
-      handleAdminRequest(req, res).catch(() => {
-        try { res.writeHead(500); res.end(); } catch { /* ignore */ }
+    let p = wantPort;
+    const attempt = () => {
+      const server = http.createServer((req, res) => {
+        handleAdminRequest(req, res).catch(() => {
+          try { res.writeHead(500); res.end(); } catch { /* ignore */ }
+        });
       });
-    });
-    server.on('error', reject);
-    server.listen(listenPort, listenHost, () => {
-      console.log(`  [admin] control panel at http://${listenHost}:${listenPort}/admin`);
-      resolve(server);
-    });
+      // If the port is busy (another admin instance, say), try the next one.
+      server.once('error', (err) => {
+        if (err.code === 'EADDRINUSE' && p < wantPort + 12) {
+          p += 1;
+          attempt();
+        } else {
+          reject(err);
+        }
+      });
+      server.listen(p, listenHost, () => {
+        if (p !== wantPort) console.log(`  [admin] port ${wantPort} was in use — using ${p}`);
+        console.log(`  [admin] control panel at http://${listenHost}:${p}/admin`);
+        resolve(server);
+      });
+    };
+    attempt();
   });
 }

@@ -27,14 +27,24 @@ async function main() {
     case 'proxy': {
       loadConfig();
       const { startProxy } = await import('../src/proxy.js');
-      await startProxy();
+      try {
+        await startProxy();
+      } catch (err) {
+        console.error(`  Could not start the proxy: ${err.message}`);
+        process.exit(1);
+      }
       break;
     }
 
     case 'admin': {
       loadConfig();
       const { startAdmin } = await import('../src/admin.js');
-      await startAdmin();
+      try {
+        await startAdmin();
+      } catch (err) {
+        console.error(`  Could not start the admin panel: ${err.message}`);
+        process.exit(1);
+      }
       break;
     }
 
