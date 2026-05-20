@@ -13,10 +13,10 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { exec } from 'child_process';
-import { getConfigDir } from '../src/config.js';
+import { getConfigDir, getConfig } from '../src/config.js';
 
 const PROJECTS_FILE = path.join(getConfigDir(), 'projects.json');
-const WORKSPACE = path.join(os.homedir(), 'MantisProjects');
+const DEFAULT_WORKSPACE = path.join(os.homedir(), 'MantisProjects');
 const SKIP = ['node_modules', '.git', '.next', 'dist', '.cache', '.venv', 'venv', '__pycache__'];
 
 function readAll() {
@@ -35,7 +35,17 @@ function git(cmd, cwd) {
   });
 }
 
-export function workspaceRoot() { return WORKSPACE; }
+/** The folder new projects and clones go into — configurable in Settings. */
+export function workspaceRoot() {
+  const d = getConfig().projectsDir;
+  return (d && d.trim()) || DEFAULT_WORKSPACE;
+}
+/** Make sure the workspace folder exists; returns its path. */
+export function ensureWorkspace() {
+  const w = workspaceRoot();
+  try { if (!fs.existsSync(w)) fs.mkdirSync(w, { recursive: true }); } catch { /* ignore */ }
+  return w;
+}
 export function list() { return readAll().sort((a, b) => b.createdAt - a.createdAt); }
 export function get(id) { return readAll().find(p => p.id === id) || null; }
 
@@ -55,7 +65,7 @@ export async function create({ name, location, gitInit = true }) {
   if (!name) return { error: 'Project name is required' };
   if (/[\\/:*?"<>|]/.test(name)) return { error: 'Name has invalid characters' };
 
-  const parent = (location && location.trim()) || WORKSPACE;
+  const parent = (location && location.trim()) || workspaceRoot();
   let dir;
   try {
     if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true });
@@ -138,7 +148,7 @@ export function browse(rawPath) {
   }
 
   let dir;
-  try { dir = path.resolve(rawPath || WORKSPACE); } catch { dir = WORKSPACE; }
+  try { dir = path.resolve(rawPath || workspaceRoot()); } catch { dir = workspaceRoot(); }
 
   let entries;
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); }

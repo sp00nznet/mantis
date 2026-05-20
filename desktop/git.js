@@ -146,19 +146,43 @@ export async function repos(connId) {
   const c = getConn(connId);
   if (!c) return { error: 'Connection not found' };
   const token = decToken(c.token);
-  let url;
-  if (c.service === 'github') url = apiBase(c.service, c.host) + '/user/repos?per_page=100&sort=updated';
-  else if (c.service === 'gitlab') url = apiBase(c.service, c.host) + '/projects?membership=true&per_page=100&order_by=last_activity_at';
-  else url = apiBase(c.service, c.host) + '/user/repos?limit=50';
+  const headers = authHeaders(c.service, token);
+  const base = apiBase(c.service, c.host);
+  const pageSize = c.service === 'gitea' ? 50 : 100;
+  const all = [];
 
   try {
-    const r = await fetch(url, { headers: authHeaders(c.service, token), signal: AbortSignal.timeout(15000) });
-    if (!r.ok) return { error: 'HTTP ' + r.status };
-    const arr = await r.json();
-    return { repos: (Array.isArray(arr) ? arr : []).map(x => normalizeRepo(c.service, x)) };
+    // Page through the API so users with hundreds of repos see them all.
+    for (let page = 1; page <= 12; page++) {
+      let url;
+      if (c.service === 'github') {
+        url = base + `/user/repos?per_page=100&sort=updated&page=${page}`;
+      } else if (c.service === 'gitlab') {
+        url = base + `/projects?membership=true&per_page=100&order_by=last_activity_at&page=${page}`;
+      } else {
+        url = base + `/user/repos?limit=50&page=${page}`;
+      }
+      const r = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
+      if (!r.ok) {
+        if (page === 1) return { error: 'HTTP ' + r.status };
+        break;
+      }
+      const arr = await r.json();
+      if (!Array.isArray(arr) || arr.length === 0) break;
+      for (const x of arr) all.push(normalizeRepo(c.service, x));
+      if (arr.length < pageSize) break;
+    }
   } catch (err) {
-    return { error: err.message };
+    if (!all.length) return { error: err.message };
   }
+
+  // Flag repos already cloned into the workspace so the UI can offer "Open".
+  const ws = workspaceRoot();
+  for (const repo of all) {
+    repo.localPath = path.join(ws, repo.name);
+    repo.cloned = fs.existsSync(repo.localPath);
+  }
+  return { repos: all };
 }
 
 export async function createRepo(connId, { name, description, isPrivate }) {

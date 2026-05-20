@@ -55,6 +55,7 @@ function createWindow() {
 app.whenReady().then(() => {
   loadConfig();
   git.setSafeStorage(safeStorage);
+  projects.ensureWorkspace();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -116,11 +117,18 @@ ipcMain.handle('config:get', () => {
   return {
     provider: c.provider,
     model: c.model,
+    projectsDir: projects.workspaceRoot(),
     providers: Object.entries(PROVIDERS).map(([key, p]) => ({
       key, name: p.name, requiresKey: p.requiresKey,
       hasKey: !!c.providerKeys?.[key], defaultModel: p.defaultModel,
     })),
   };
+});
+
+ipcMain.handle('config:setProjectsDir', (_e, dir) => {
+  saveConfig({ projectsDir: (dir || '').trim() });
+  projects.ensureWorkspace();
+  return { ok: true };
 });
 
 ipcMain.handle('config:setProvider', (_e, { provider, model }) => {

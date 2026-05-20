@@ -519,6 +519,7 @@ async function renderSettings() {
     .join('');
   ps.onchange = () => { fillModels(ps.value, ''); updateKeyLabel(); };
   updateKeyLabel();
+  $('setProjectsDir').value = CONFIG.projectsDir || '';
   await fillModels(CONFIG.provider, CONFIG.model);
 }
 function updateKeyLabel() {
@@ -578,10 +579,10 @@ async function pickNav(p) {
 // ─── new-project modal ──────────────────────────────────────────────
 async function openProjectModal() {
   $('projName').value = '';
-  $('projLoc').value = '';
   $('projGit').checked = true;
   const ws = await M.workspaceRoot();
-  $('projLoc').placeholder = 'default: ' + ws;
+  $('projLoc').value = ws;          // prefilled with the real folder
+  $('projLoc').placeholder = ws;
   $('projModal').classList.remove('hidden');
   $('projName').focus();
 }
@@ -652,6 +653,16 @@ function wire() {
     const r = await M.setKey($('setProvider').value, $('setKey').value);
     if (r && r.ok) { toast('API key saved'); renderSettings(); }
     else toast((r && r.error) || 'Failed', true);
+  };
+  $('browseProjectsDir').onclick = () => {
+    openPicker('Choose projects folder', $('setProjectsDir').value.trim() || null, (dir) => {
+      $('setProjectsDir').value = dir;
+    });
+  };
+  $('saveProjectsDir').onclick = async () => {
+    const r = await M.setProjectsDir($('setProjectsDir').value.trim());
+    if (r && r.ok) toast('Projects folder saved');
+    else toast('Failed to save', true);
   };
 
   // new-project modal
@@ -755,7 +766,7 @@ async function loadRepos() {
   const box = $('repoList');
   if (res.error) { box.innerHTML = '<div class="list-empty">' + escapeHtml(res.error) + '</div>'; return; }
   if (!res.repos.length) { box.innerHTML = '<div class="list-empty">No repositories found.</div>'; return; }
-  box.innerHTML = '';
+  box.innerHTML = '<div class="repo-count">' + res.repos.length + ' repositories</div>';
   res.repos.forEach(r => {
     const el = document.createElement('div');
     el.className = 'repo';
@@ -763,10 +774,18 @@ async function loadRepos() {
       '<div class="info"><div class="rn">' + escapeHtml(r.name) +
         (r.private ? '<span class="badge">private</span>' : '') + '</div>' +
         (r.description ? '<div class="rd">' + escapeHtml(r.description) + '</div>' : '') +
+        '<div class="rp">' + (r.cloned ? '✓ cloned at ' : '→ ') +
+          escapeHtml(r.localPath || '') + '</div>' +
       '</div>';
     const btn = document.createElement('button');
-    btn.textContent = 'Clone';
-    btn.onclick = () => cloneRepo(r, btn);
+    if (r.cloned) {
+      btn.textContent = 'Open';
+      btn.className = 'open';
+      btn.onclick = () => openClonedRepo(r);
+    } else {
+      btn.textContent = 'Clone';
+      btn.onclick = () => cloneRepo(r, btn);
+    }
     el.appendChild(btn);
     box.appendChild(el);
   });
@@ -775,13 +794,24 @@ async function cloneRepo(repo, btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'Cloning…'; }
   const res = await M.gitClone(CURRENT_CONN, repo);
   if (res && res.id) {
-    toast('Cloned ' + repo.name);
+    toast('Cloned to ' + res.path);
     await loadProjects();
     selectSection('projects');
     openProject(res.id);
   } else {
     toast((res && res.error) || 'Clone failed', true);
     if (btn) { btn.disabled = false; btn.textContent = 'Clone'; }
+  }
+}
+async function openClonedRepo(repo) {
+  const proj = await M.openProjectFolder(repo.localPath);
+  if (proj && proj.id) {
+    toast('Opened ' + repo.name);
+    await loadProjects();
+    selectSection('projects');
+    openProject(proj.id);
+  } else {
+    toast((proj && proj.error) || 'Could not open the folder', true);
   }
 }
 async function removeConn(id) {

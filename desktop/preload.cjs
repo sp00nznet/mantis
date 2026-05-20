@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('mantis', {
   getConfig: () => ipcRenderer.invoke('config:get'),
   setProvider: (provider, model) => ipcRenderer.invoke('config:setProvider', { provider, model }),
   setKey: (provider, key) => ipcRenderer.invoke('config:setKey', { provider, key }),
+  setProjectsDir: (dir) => ipcRenderer.invoke('config:setProjectsDir', dir),
   listModels: (provider) => ipcRenderer.invoke('config:models', provider),
 
   // chat
