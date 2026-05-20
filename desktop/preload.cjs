@@ -24,6 +24,18 @@ contextBridge.exposeInMainWorld('mantis', {
   browseDirs: (p) => ipcRenderer.invoke('projects:browse', p),
   workspaceRoot: () => ipcRenderer.invoke('projects:workspace'),
 
+  // git
+  gitConnections: () => ipcRenderer.invoke('git:connections'),
+  gitAddConnection: (opts) => ipcRenderer.invoke('git:addConnection', opts),
+  gitRemoveConnection: (id) => ipcRenderer.invoke('git:removeConnection', id),
+  gitRepos: (connId) => ipcRenderer.invoke('git:repos', connId),
+  gitCreateRepo: (opts) => ipcRenderer.invoke('git:createRepo', opts),
+  gitClone: (connId, repo) => ipcRenderer.invoke('git:clone', { connId, repo }),
+  gitStatus: (projectPath) => ipcRenderer.invoke('git:status', projectPath),
+  gitCommit: (projectPath, message) => ipcRenderer.invoke('git:commit', { projectPath, message }),
+  gitPush: (projectPath) => ipcRenderer.invoke('git:push', projectPath),
+  gitPull: (projectPath) => ipcRenderer.invoke('git:pull', projectPath),
+
   // config / providers
   getConfig: () => ipcRenderer.invoke('config:get'),
   setProvider: (provider, model) => ipcRenderer.invoke('config:setProvider', { provider, model }),

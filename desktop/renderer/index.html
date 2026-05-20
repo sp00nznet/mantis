@@ -39,6 +39,7 @@
         <div class="chat-title" id="chatTitle">New chat</div>
         <button class="chat-provider" id="chatProvider" title="Change in Settings">—</button>
         <button class="chat-files hidden" id="chatFilesBtn" title="Project files">📁 Files</button>
+        <button class="chat-files hidden" id="chatGitBtn" title="Project git">⎇ Git</button>
       </header>
       <div id="messages"></div>
       <div class="composer">
@@ -58,6 +59,39 @@
         <div class="file-view" id="fileView">
           <div class="placeholder"><p>Select a file to preview it.</p></div>
         </div>
+      </div>
+    </section>
+
+    <!-- repos view (Git rail) -->
+    <section id="reposView" class="hidden">
+      <header class="chat-head">
+        <div class="chat-title" id="reposTitle">Repositories</div>
+        <button class="ghost" id="reposRefresh" title="Refresh">⟳</button>
+        <button id="reposCreate">+ Create repo</button>
+      </header>
+      <div id="repoList"></div>
+    </section>
+
+    <!-- project git view -->
+    <section id="gitView" class="hidden">
+      <header class="chat-head">
+        <button class="back-btn" id="gitBack">‹ Chat</button>
+        <div class="chat-title" id="gitTitle">Git</div>
+        <button class="ghost" id="gitRefresh" title="Refresh">⟳</button>
+      </header>
+      <div class="git-body">
+        <div class="git-branch" id="gitBranch">—</div>
+        <div class="git-changes" id="gitChanges"></div>
+        <div class="git-commit">
+          <textarea id="gitMsg" rows="2" placeholder="Commit message…"></textarea>
+          <div class="git-actions">
+            <button id="gitCommitBtn">Commit</button>
+            <span class="spacer"></span>
+            <button class="ghost" id="gitPullBtn">Pull</button>
+            <button class="ghost" id="gitPushBtn">Push</button>
+          </div>
+        </div>
+        <pre class="git-output" id="gitOutput"></pre>
       </div>
     </section>
 
@@ -125,6 +159,51 @@
       <span class="spacer"></span>
       <button class="ghost" id="pickCancel">Cancel</button>
       <button id="pickChoose">Use this folder</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Connect-a-service modal ── -->
+<div id="connModal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><b>Connect a git service</b><span class="modal-x" id="connX">✕</span></div>
+    <div class="modal-body">
+      <label>Service</label>
+      <select id="connService">
+        <option value="github">GitHub</option>
+        <option value="gitlab">GitLab</option>
+        <option value="gitea">Gitea</option>
+      </select>
+      <label>Host URL</label>
+      <input id="connHost" placeholder="https://github.com">
+      <label>Personal Access Token</label>
+      <input type="password" id="connToken" placeholder="paste your PAT">
+      <p class="hint" id="connHelp"></p>
+    </div>
+    <div class="modal-foot">
+      <span class="spacer"></span>
+      <button class="ghost" id="connCancel">Cancel</button>
+      <button id="connSave">Connect</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Create-repo modal ── -->
+<div id="repoModal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><b>Create repository</b><span class="modal-x" id="repoX">✕</span></div>
+    <div class="modal-body">
+      <label>Repository name</label>
+      <input id="repoName" placeholder="my-repo">
+      <label>Description</label>
+      <input id="repoDesc" placeholder="optional">
+      <label class="check-row"><input type="checkbox" id="repoPrivate" checked> Private repository</label>
+      <p class="hint">The repo is created with a README, then cloned into your workspace as a project.</p>
+    </div>
+    <div class="modal-foot">
+      <span class="spacer"></span>
+      <button class="ghost" id="repoCancel">Cancel</button>
+      <button id="repoCreateBtn">Create &amp; clone</button>
     </div>
   </div>
 </div>

@@ -4,8 +4,8 @@ A Claude-style desktop app for Mantis — chat, projects, and git in one window.
 It's an **Electron** app that reuses Mantis's existing engine (providers, the
 streaming LLM client, config) and shares `~/.mantis/config.json` with the CLI.
 
-> **Status: Phase 2** — general chat plus projects: agent-mode sessions bound
-> to a folder, with full tools and a file tree. Git integration is next.
+> **Status: Phase 3** — chat, projects with agent mode, and git: connect
+> services, clone and create repos, and commit/push/pull inside a project.
 
 ---
 
@@ -74,11 +74,28 @@ The **Projects** tab turns a folder into an agent workspace.
 > commands in the project folder without prompting, like the CLI's `/auto`
 > mode. Only open projects you trust it to work in.
 
+## Git (Phase 3)
+
+The **Git** tab connects the app to your git hosting.
+
+- **Connect a service** — add a **GitHub**, **GitLab**, or **Gitea** connection
+  with a Personal Access Token (self-hosted instances work — just give the host
+  URL). Tokens are encrypted with the OS keystore (Electron `safeStorage`) when
+  available. The registry is `~/.mantis/git.json`.
+- **Browse & clone** — list your repositories and clone any of them into the
+  workspace with one click; the clone is registered as a project. The token is
+  used for the clone but kept out of the repo's `.git/config`.
+- **Create a repo** — make a new repository on the service (with a README),
+  which is then cloned as a project.
+- **Project git panel** — inside a project, the **⎇ Git** button shows the
+  current branch and changed files, with **commit**, **push**, and **pull**.
+  Push/pull authenticate with the matching connection's token.
+
+> Git operations shell out to the `git` command — it must be installed and on
+> your PATH.
+
 ## Roadmap
 
-- **Phase 3 — Git** — connect GitHub / GitLab / Gitea / Bitbucket with a
-  Personal Access Token (self-hosted too), browse and clone repos, create new
-  remote repos, and run git from inside a project.
 - **Phase 4** — packaged Windows installer (`.exe`) and polish.
 
 ## How it's built
@@ -89,5 +106,6 @@ The **Projects** tab turns a folder into an agent workspace.
   sandboxed renderer).
 - `desktop/store.js` — session persistence.
 - `desktop/projects.js` — project registry, file tree, directory browsing.
+- `desktop/git.js` — git connections, service APIs, clone, and project git ops.
 - `desktop/chat.js` — the chat runner and the agent-mode runner.
 - `desktop/renderer/` — the UI (HTML/CSS/JS).

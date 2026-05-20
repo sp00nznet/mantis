@@ -6,12 +6,13 @@
  * Phase 2: projects — agent-mode sessions bound to a folder, with a file tree.
  */
 
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, safeStorage } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { loadConfig, getConfig, saveConfig, PROVIDERS } from '../src/config.js';
 import * as store from './store.js';
 import * as projects from './projects.js';
+import * as git from './git.js';
 import { runChatTurn, runAgentTurn, listModels } from './chat.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -53,6 +54,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   loadConfig();
+  git.setSafeStorage(safeStorage);
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -88,6 +90,24 @@ ipcMain.handle('projects:children', (_e, dir) => projects.children(dir));
 ipcMain.handle('projects:readFile', (_e, file) => projects.readFile(file));
 ipcMain.handle('projects:browse', (_e, p) => projects.browse(p));
 ipcMain.handle('projects:workspace', () => projects.workspaceRoot());
+
+// ─── Git IPC ────────────────────────────────────────────────────────
+
+ipcMain.handle('git:connections', () => git.listConnections());
+ipcMain.handle('git:addConnection', (_e, opts) => git.addConnection(opts || {}));
+ipcMain.handle('git:removeConnection', (_e, id) => git.removeConnection(id));
+ipcMain.handle('git:repos', (_e, connId) => git.repos(connId));
+ipcMain.handle('git:createRepo', (_e, { connId, ...opts }) => git.createRepo(connId, opts));
+ipcMain.handle('git:clone', async (_e, { connId, repo }) => {
+  const res = await git.clone(connId, repo);
+  if (res.error) return res;
+  const proj = projects.openExisting(res.path);
+  return proj && proj.id ? proj : { error: 'Cloned, but failed to register as a project' };
+});
+ipcMain.handle('git:status', (_e, projectPath) => git.status(projectPath));
+ipcMain.handle('git:commit', (_e, { projectPath, message }) => git.commit(projectPath, message));
+ipcMain.handle('git:push', (_e, projectPath) => git.push(projectPath));
+ipcMain.handle('git:pull', (_e, projectPath) => git.pull(projectPath));
 
 // ─── Config IPC ─────────────────────────────────────────────────────
 

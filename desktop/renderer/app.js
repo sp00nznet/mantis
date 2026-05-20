@@ -20,6 +20,8 @@ let streamBuf = '';
 let thinkingEl = null;
 let pickCb = null;                // folder-picker callback
 let pickCur = null;               // folder-picker current path
+let GIT_CONNS = [];               // git service connections
+let CURRENT_CONN = null;          // selected connection id (git section)
 
 // ─── toast ──────────────────────────────────────────────────────────
 const toastEl = document.createElement('div');
@@ -69,7 +71,7 @@ function timeAgo(ts) {
 
 // ─── views ──────────────────────────────────────────────────────────
 function show(view) {
-  ['chatView', 'filesView', 'settingsView', 'placeholderView'].forEach(v => {
+  ['chatView', 'filesView', 'reposView', 'gitView', 'settingsView', 'placeholderView'].forEach(v => {
     $(v).classList.toggle('hidden', v !== view);
   });
 }
@@ -120,9 +122,11 @@ function selectSection(name) {
     show('settingsView');
     renderSettings();
   } else {
-    $('list').classList.add('hidden');
-    placeholder('⎇', 'Git',
-      'Connect GitHub, GitLab, and Gitea, then clone repos — coming in Phase 3.');
+    $('list').classList.remove('hidden');
+    renderList();
+    if (CURRENT_CONN) openConn(CURRENT_CONN);
+    else placeholder('⎇', 'Git',
+      'Connect a git service to browse and clone your repositories. Click <b>+ Add</b>.');
   }
 }
 
@@ -150,7 +154,31 @@ function renderList() {
     title.style.cursor = 'default';
     $('newBtn').textContent = '+ New';
     renderProjectItems(body);
+  } else if (SECTION === 'git') {
+    title.textContent = 'Connections';
+    title.style.cursor = 'default';
+    $('newBtn').textContent = '+ Add';
+    renderConnItems(body);
   }
+}
+function renderConnItems(body) {
+  if (!GIT_CONNS.length) {
+    body.innerHTML = '<div class="list-empty">No services connected — click + Add.</div>';
+    return;
+  }
+  GIT_CONNS.forEach(c => {
+    const el = document.createElement('div');
+    el.className = 'sess' + (c.id === CURRENT_CONN ? ' sel' : '');
+    el.innerHTML =
+      '<span class="x" title="disconnect">✕</span>' +
+      '<div class="t">' + escapeHtml(c.name) + '</div>' +
+      '<div class="p">' + escapeHtml(c.service) + '</div>';
+    el.onclick = (ev) => {
+      if (ev.target.classList.contains('x')) { removeConn(c.id); return; }
+      openConn(c.id);
+    };
+    body.appendChild(el);
+  });
 }
 function renderSessionItems(body, items, emptyMsg) {
   if (!items.length) {
@@ -232,6 +260,7 @@ async function openSession(id) {
   $('chatTitle').textContent = s.title;
   $('chatProvider').textContent = providerLabel();
   $('chatFilesBtn').classList.toggle('hidden', s.mode !== 'agent');
+  $('chatGitBtn').classList.toggle('hidden', s.mode !== 'agent');
   renderMessages(s.messages || []);
   show('chatView');
   scrollDown();
@@ -568,6 +597,7 @@ function onNewBtn() {
   if (SECTION === 'chats') newChat();
   else if (SECTION === 'projects' && CURRENT_PROJECT) newAgentChat();
   else if (SECTION === 'projects') openProjectModal();
+  else if (SECTION === 'git') openConnModal();
 }
 
 function wire() {
@@ -677,6 +707,25 @@ function wire() {
     if (e.key === 'Escape') document.querySelectorAll('.modal').forEach(m => m.classList.add('hidden'));
   });
 
+  // git rail
+  $('reposRefresh').onclick = loadRepos;
+  $('reposCreate').onclick = openRepoModal;
+  $('connX').onclick = () => $('connModal').classList.add('hidden');
+  $('connCancel').onclick = () => $('connModal').classList.add('hidden');
+  $('connService').onchange = syncConnModal;
+  $('connSave').onclick = saveConnection;
+  $('repoX').onclick = () => $('repoModal').classList.add('hidden');
+  $('repoCancel').onclick = () => $('repoModal').classList.add('hidden');
+  $('repoCreateBtn').onclick = createRepo;
+
+  // project git panel
+  $('chatGitBtn').onclick = openGit;
+  $('gitBack').onclick = () => show('chatView');
+  $('gitRefresh').onclick = refreshGit;
+  $('gitCommitBtn').onclick = doCommit;
+  $('gitPushBtn').onclick = () => doTransfer('push');
+  $('gitPullBtn').onclick = () => doTransfer('pull');
+
   // streaming
   M.onToken(onToken);
   M.onTool(onTool);
@@ -686,11 +735,203 @@ function wire() {
   M.onThinking(() => {});
 }
 
+// ─── git: connections & remote repos ────────────────────────────────
+async function loadConnections() {
+  GIT_CONNS = await M.gitConnections();
+  if (SECTION === 'git') renderList();
+}
+async function openConn(id) {
+  CURRENT_CONN = id;
+  renderList();
+  const conn = GIT_CONNS.find(c => c.id === id);
+  $('reposTitle').textContent = conn ? conn.name : 'Repositories';
+  $('repoList').innerHTML = '<div class="list-empty">Loading repositories…</div>';
+  show('reposView');
+  loadRepos();
+}
+async function loadRepos() {
+  if (!CURRENT_CONN) return;
+  const res = await M.gitRepos(CURRENT_CONN);
+  const box = $('repoList');
+  if (res.error) { box.innerHTML = '<div class="list-empty">' + escapeHtml(res.error) + '</div>'; return; }
+  if (!res.repos.length) { box.innerHTML = '<div class="list-empty">No repositories found.</div>'; return; }
+  box.innerHTML = '';
+  res.repos.forEach(r => {
+    const el = document.createElement('div');
+    el.className = 'repo';
+    el.innerHTML =
+      '<div class="info"><div class="rn">' + escapeHtml(r.name) +
+        (r.private ? '<span class="badge">private</span>' : '') + '</div>' +
+        (r.description ? '<div class="rd">' + escapeHtml(r.description) + '</div>' : '') +
+      '</div>';
+    const btn = document.createElement('button');
+    btn.textContent = 'Clone';
+    btn.onclick = () => cloneRepo(r, btn);
+    el.appendChild(btn);
+    box.appendChild(el);
+  });
+}
+async function cloneRepo(repo, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Cloning…'; }
+  const res = await M.gitClone(CURRENT_CONN, repo);
+  if (res && res.id) {
+    toast('Cloned ' + repo.name);
+    await loadProjects();
+    selectSection('projects');
+    openProject(res.id);
+  } else {
+    toast((res && res.error) || 'Clone failed', true);
+    if (btn) { btn.disabled = false; btn.textContent = 'Clone'; }
+  }
+}
+async function removeConn(id) {
+  if (!confirm('Disconnect this service?')) return;
+  await M.gitRemoveConnection(id);
+  if (CURRENT_CONN === id) CURRENT_CONN = null;
+  await loadConnections();
+  if (!CURRENT_CONN) {
+    placeholder('⎇', 'Git', 'Connect a git service to browse and clone repos.');
+  }
+}
+
+const CONN_HOST = { github: 'https://github.com', gitlab: 'https://gitlab.com', gitea: '' };
+const CONN_HELP = {
+  github: 'Create a token at github.com/settings/tokens with the "repo" scope.',
+  gitlab: 'Create a token in GitLab → Settings → Access Tokens with the "api" scope.',
+  gitea: 'Create a token in your Gitea instance → Settings → Applications. Set its host URL above.',
+};
+function openConnModal() {
+  $('connService').value = 'github';
+  syncConnModal();
+  $('connToken').value = '';
+  $('connModal').classList.remove('hidden');
+}
+function syncConnModal() {
+  const s = $('connService').value;
+  $('connHost').value = CONN_HOST[s];
+  $('connHost').placeholder = CONN_HOST[s] || 'https://gitea.example.com';
+  $('connHelp').textContent = CONN_HELP[s];
+}
+async function saveConnection() {
+  const btn = $('connSave');
+  btn.disabled = true; btn.textContent = 'Connecting…';
+  const res = await M.gitAddConnection({
+    service: $('connService').value,
+    host: $('connHost').value.trim(),
+    token: $('connToken').value,
+  });
+  btn.disabled = false; btn.textContent = 'Connect';
+  if (res && res.id) {
+    $('connModal').classList.add('hidden');
+    await loadConnections();
+    toast('Connected — ' + res.name);
+    openConn(res.id);
+  } else {
+    toast((res && res.error) || 'Failed to connect', true);
+  }
+}
+function openRepoModal() {
+  if (!CURRENT_CONN) { toast('Select a connection first', true); return; }
+  $('repoName').value = '';
+  $('repoDesc').value = '';
+  $('repoPrivate').checked = true;
+  $('repoModal').classList.remove('hidden');
+}
+async function createRepo() {
+  const btn = $('repoCreateBtn');
+  btn.disabled = true; btn.textContent = 'Creating…';
+  const res = await M.gitCreateRepo({
+    connId: CURRENT_CONN,
+    name: $('repoName').value.trim(),
+    description: $('repoDesc').value.trim(),
+    isPrivate: $('repoPrivate').checked,
+  });
+  if (res && res.repo) {
+    btn.textContent = 'Cloning…';
+    const cl = await M.gitClone(CURRENT_CONN, res.repo);
+    btn.disabled = false; btn.textContent = 'Create & clone';
+    if (cl && cl.id) {
+      $('repoModal').classList.add('hidden');
+      toast('Created ' + res.repo.name);
+      await loadProjects();
+      selectSection('projects');
+      openProject(cl.id);
+    } else {
+      toast('Repo created, but clone failed: ' + ((cl && cl.error) || ''), true);
+      loadRepos();
+    }
+  } else {
+    btn.disabled = false; btn.textContent = 'Create & clone';
+    toast((res && res.error) || 'Failed to create repository', true);
+  }
+}
+
+// ─── git: per-project panel ─────────────────────────────────────────
+async function openGit() {
+  const proj = currentProject();
+  if (!proj) { toast('No project for this session', true); return; }
+  $('gitTitle').textContent = proj.name;
+  $('gitOutput').textContent = '';
+  $('gitMsg').value = '';
+  show('gitView');
+  refreshGit();
+}
+async function refreshGit() {
+  const proj = currentProject();
+  if (!proj) return;
+  const st = await M.gitStatus(proj.path);
+  if (st.error) {
+    $('gitBranch').textContent = st.error;
+    $('gitChanges').innerHTML = '';
+    return;
+  }
+  $('gitBranch').innerHTML = 'Branch: <b>' + escapeHtml(st.branch || '(none)') + '</b>';
+  const box = $('gitChanges');
+  if (!st.files.length) {
+    box.innerHTML = '<div class="git-clean">✓ Working tree clean</div>';
+  } else {
+    box.innerHTML = st.files.map(f =>
+      '<div class="git-change"><span class="gx">' + escapeHtml(f.x || '·') + '</span>' +
+      escapeHtml(f.path) + '</div>').join('');
+  }
+}
+function gitBusy(on) {
+  ['gitCommitBtn', 'gitPushBtn', 'gitPullBtn'].forEach(id => { $(id).disabled = on; });
+}
+async function doCommit() {
+  const proj = currentProject();
+  if (!proj) return;
+  gitBusy(true);
+  const res = await M.gitCommit(proj.path, $('gitMsg').value);
+  gitBusy(false);
+  if (res.ok) {
+    $('gitMsg').value = '';
+    $('gitOutput').textContent = res.output || 'Committed.';
+    toast('Committed');
+    refreshGit();
+  } else {
+    $('gitOutput').textContent = res.error;
+    toast(res.error, true);
+  }
+}
+async function doTransfer(kind) {
+  const proj = currentProject();
+  if (!proj) return;
+  gitBusy(true);
+  $('gitOutput').textContent = kind === 'push' ? 'Pushing…' : 'Pulling…';
+  const res = await (kind === 'push' ? M.gitPush(proj.path) : M.gitPull(proj.path));
+  gitBusy(false);
+  $('gitOutput').textContent = res.ok ? (res.output || 'Done.') : res.error;
+  toast(res.ok ? (kind + ' complete') : res.error, !res.ok);
+  if (res.ok) refreshGit();
+}
+
 // ─── init ───────────────────────────────────────────────────────────
 async function init() {
   wire();
   CONFIG = await M.getConfig();
   await loadProjects();
+  await loadConnections();
   await loadSessions();
   const firstChat = SESSIONS.find(s => s.mode !== 'agent');
   if (firstChat) { CURRENT = firstChat.id; }
