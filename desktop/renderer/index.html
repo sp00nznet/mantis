@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>Mantis</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Icon rail ── -->
+  <nav id="rail">
+    <pre class="rail-logo">\_/
+(o.o)
+/|_|\</pre>
+    <button class="rail-btn active" data-section="chats" title="Chats">💬</button>
+    <button class="rail-btn" data-section="projects" title="Projects">📁</button>
+    <button class="rail-btn" data-section="git" title="Git">⎇</button>
+    <div class="rail-spacer"></div>
+    <button class="rail-btn" data-section="settings" title="Settings">⚙</button>
+  </nav>
+
+  <!-- ── Middle list ── -->
+  <aside id="list">
+    <div class="list-head">
+      <span id="listTitle">Chats</span>
+      <button id="newBtn" title="New chat">+ New</button>
+    </div>
+    <div id="listBody"></div>
+  </aside>
+
+  <!-- ── Main area ── -->
+  <main id="main">
+
+    <!-- chat view -->
+    <section id="chatView" class="hidden">
+      <header class="chat-head">
+        <div class="chat-title" id="chatTitle">New chat</div>
+        <button class="chat-provider" id="chatProvider" title="Change in Settings">—</button>
+      </header>
+      <div id="messages"></div>
+      <div class="composer">
+        <textarea id="composerInput" rows="1" placeholder="Message Mantis…  (Enter to send, Shift+Enter for newline)"></textarea>
+        <button id="sendBtn">Send</button>
+      </div>
+    </section>
+
+    <!-- settings view -->
+    <section id="settingsView" class="hidden">
+      <h1>Settings</h1>
+      <div class="card">
+        <h2>Active provider</h2>
+        <div class="field-row">
+          <div><label>Provider</label><select id="setProvider"></select></div>
+          <div><label>Model</label><select id="setModel"></select></div>
+          <button class="ghost" id="refreshModels" title="Refresh models">⟳</button>
+          <button id="saveProvider">Save</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>API key</h2>
+        <label id="keyLabel">API key</label>
+        <div class="field-row">
+          <input type="password" id="setKey" placeholder="paste API key">
+          <button id="saveKey">Save</button>
+        </div>
+        <p class="hint">Keys are shared with the Mantis CLI (~/.mantis/config.json).</p>
+      </div>
+    </section>
+
+    <!-- generic placeholder (projects / git / welcome) -->
+    <section id="placeholderView" class="hidden">
+      <div class="placeholder" id="placeholderBody"></div>
+    </section>
+
+  </main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

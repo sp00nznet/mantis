@@ -1,0 +1,14 @@
+{
+  "name": "mantis-desktop",
+  "version": "0.1.0",
+  "description": "Mantis Desktop — chat, projects, and git in a Claude-style app",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.3.1"
+  },
+  "license": "MIT"
+}

@@ -74,6 +74,8 @@ mantis bot discord       # run the Discord bot
 - **Anthropic-compatible proxy** — `mantis serve` lets the real Claude Code,
   VS Code, and JetBrains run on your provider pool. See [docs/proxy.md](docs/proxy.md).
 - **Chat bots** — drive Mantis from Telegram or Discord. See [docs/bots.md](docs/bots.md).
+- **Desktop app** — a Claude-style Electron app: general chat with persistent,
+  resumable history (projects & git on the way). See [docs/desktop.md](docs/desktop.md).
 - **Admin web UI** — `mantis admin` to manage keys, providers, and routing in a
   browser — plus a Sessions tab that runs live agents in xterm.js terminals.
 - **Plan mode** — `/plan` to explore and design without touching anything.
@@ -161,6 +163,7 @@ The full table — base URLs, default models, free-tier notes — is in
 | [Swarm Mode](docs/swarm.md) | Multi-provider parallel execution |
 | [Proxy](docs/proxy.md) | Anthropic-compatible proxy + admin UI |
 | [Chat Bots](docs/bots.md) | Telegram & Discord wrappers |
+| [Desktop App](docs/desktop.md) | The Claude-style Electron app |
 | [Tools](docs/tools.md) | The 10 built-in tools |
 | [Skills](docs/skills.md) | Built-in and custom slash commands |
 | [Plan Mode](docs/plan-mode.md) | Read-only exploration mode |
