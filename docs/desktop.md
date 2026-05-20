@@ -4,8 +4,8 @@ A Claude-style desktop app for Mantis — chat, projects, and git in one window.
 It's an **Electron** app that reuses Mantis's existing engine (providers, the
 streaming LLM client, config) and shares `~/.mantis/config.json` with the CLI.
 
-> **Status: Phase 1** — general chat with persistent, resumable history.
-> Projects (agent mode) and git integration are on the roadmap below.
+> **Status: Phase 2** — general chat plus projects: agent-mode sessions bound
+> to a folder, with full tools and a file tree. Git integration is next.
 
 ---
 
@@ -44,7 +44,7 @@ A three-pane layout with an icon rail:
 - **List** — your conversation history (newest first).
 - **Main** — the chat, with a streaming response and a composer.
 
-## Phase 1 — what works now
+## Chat (Phase 1)
 
 - **General chat** — a Claude-style conversation with any configured provider.
   No filesystem tools; it's a plain assistant.
@@ -55,10 +55,27 @@ A three-pane layout with an icon rail:
 - **Settings** — pick the active provider and model (the model list is polled
   live from the provider) and set API keys.
 
+## Projects (Phase 2)
+
+The **Projects** tab turns a folder into an agent workspace.
+
+- **New project** — names a folder, creates it (under `~/MantisProjects/` by
+  default, or any location you browse to), and runs `git init`. You can also
+  **open an existing folder** as a project. The registry is
+  `~/.mantis/projects.json`; removing a project never deletes the folder.
+- **Agent-mode sessions** — chats started inside a project run the **full
+  Mantis tool loop** (read / write / edit / run commands / search) with the
+  project folder as the working directory. Tool calls show inline in the
+  transcript, and the conversation is persisted and resumable just like a chat.
+- **File tree** — the **Files** tab shows the project's contents; expand
+  folders and click a file to preview it.
+
+> Agent-mode tool calls are **auto-approved** — Mantis can write files and run
+> commands in the project folder without prompting, like the CLI's `/auto`
+> mode. Only open projects you trust it to work in.
+
 ## Roadmap
 
-- **Phase 2 — Projects** — create project folders, agent-mode sessions bound to
-  a working directory with full tools (read/write/run), and a file tree.
 - **Phase 3 — Git** — connect GitHub / GitLab / Gitea / Bitbucket with a
   Personal Access Token (self-hosted too), browse and clone repos, create new
   remote repos, and run git from inside a project.
@@ -71,5 +88,6 @@ A three-pane layout with an icon rail:
 - `desktop/preload.cjs` — the secure `window.mantis` bridge (context-isolated,
   sandboxed renderer).
 - `desktop/store.js` — session persistence.
-- `desktop/chat.js` — the tool-free chat runner (reuses `callLLM`).
+- `desktop/projects.js` — project registry, file tree, directory browsing.
+- `desktop/chat.js` — the chat runner and the agent-mode runner.
 - `desktop/renderer/` — the UI (HTML/CSS/JS).

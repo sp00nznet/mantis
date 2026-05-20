@@ -6,8 +6,9 @@
  * `createAgent()` instead.
  */
 
-import { callLLM } from '../src/agent.js';
+import { callLLM, createAgent } from '../src/agent.js';
 import { getConfig, PROVIDERS, buildConnection } from '../src/config.js';
+import { setWorkingDirectory } from '../src/tools.js';
 import { buildChatPrompt } from '../src/prompt.js';
 
 /**
@@ -41,6 +42,35 @@ export async function runChatTurn(session, { onText, onError, onThinking }, isCa
     onToken: () => {},
     tools: [], // plain chat — no tools
   }, isCancelled);
+}
+
+/**
+ * Run one agent turn for a project-bound session. Uses the full Mantis tool
+ * loop with the project folder as the working directory. Tool calls are
+ * auto-approved (there's no terminal to confirm at). Mutates session.messages.
+ * @param {object} ctl - { cancelled:boolean, agent } — agent is set so it can be cancelled
+ */
+export async function runAgentTurn(session, project, text, cb, ctl) {
+  setWorkingDirectory(project.path);
+  const agent = createAgent();
+  if (Array.isArray(session.messages) && session.messages.length) {
+    agent.setMessages(session.messages);
+  }
+  ctl.agent = agent;
+
+  await agent.chat(text, {
+    maxLoops: 40,
+    onText: cb.onText,
+    onToolCall: cb.onToolCall,
+    onToolResult: cb.onToolResult,
+    onError: cb.onError,
+    onThinking: cb.onThinking,
+    onToken: () => {},
+    onCompact: () => {},
+    onConfirmToolCall: async () => !ctl.cancelled, // auto-approve unless stopped
+  });
+
+  session.messages = agent.getMessages();
 }
 
 /** Fetch the model catalogue a provider exposes via /models. */

@@ -25,7 +25,7 @@
   <aside id="list">
     <div class="list-head">
       <span id="listTitle">Chats</span>
-      <button id="newBtn" title="New chat">+ New</button>
+      <button id="newBtn" title="New">+ New</button>
     </div>
     <div id="listBody"></div>
   </aside>
@@ -33,16 +33,31 @@
   <!-- ── Main area ── -->
   <main id="main">
 
-    <!-- chat view -->
+    <!-- chat / agent view -->
     <section id="chatView" class="hidden">
       <header class="chat-head">
         <div class="chat-title" id="chatTitle">New chat</div>
         <button class="chat-provider" id="chatProvider" title="Change in Settings">—</button>
+        <button class="chat-files hidden" id="chatFilesBtn" title="Project files">📁 Files</button>
       </header>
       <div id="messages"></div>
       <div class="composer">
         <textarea id="composerInput" rows="1" placeholder="Message Mantis…  (Enter to send, Shift+Enter for newline)"></textarea>
         <button id="sendBtn">Send</button>
+      </div>
+    </section>
+
+    <!-- files view -->
+    <section id="filesView" class="hidden">
+      <header class="chat-head">
+        <button class="back-btn" id="filesBack">‹ Chat</button>
+        <div class="chat-title" id="filesTitle">Files</div>
+      </header>
+      <div class="files-body">
+        <div class="file-tree" id="fileTree"></div>
+        <div class="file-view" id="fileView">
+          <div class="placeholder"><p>Select a file to preview it.</p></div>
+        </div>
       </div>
     </section>
 
@@ -69,13 +84,51 @@
       </div>
     </section>
 
-    <!-- generic placeholder (projects / git / welcome) -->
+    <!-- placeholder (welcome / git / pick-a-project) -->
     <section id="placeholderView" class="hidden">
       <div class="placeholder" id="placeholderBody"></div>
     </section>
 
   </main>
 </div>
+
+<!-- ── New-project modal ── -->
+<div id="projModal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><b>New project</b><span class="modal-x" id="projModalX">✕</span></div>
+    <div class="modal-body">
+      <label>Project name</label>
+      <input id="projName" placeholder="my-project">
+      <label>Location (parent folder)</label>
+      <div class="field-row">
+        <input id="projLoc" placeholder="default workspace">
+        <button class="ghost" id="projBrowse">Browse…</button>
+      </div>
+      <label class="check-row"><input type="checkbox" id="projGit" checked> Initialize a git repository</label>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" id="projOpenExisting">Open existing folder…</button>
+      <span class="spacer"></span>
+      <button class="ghost" id="projCancel">Cancel</button>
+      <button id="projCreate">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Folder-picker modal ── -->
+<div id="pickModal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><b id="pickTitle">Choose a folder</b><span class="modal-x" id="pickX">✕</span></div>
+    <div class="pick-path" id="pickPath">…</div>
+    <div class="pick-list" id="pickList"></div>
+    <div class="modal-foot">
+      <span class="spacer"></span>
+      <button class="ghost" id="pickCancel">Cancel</button>
+      <button id="pickChoose">Use this folder</button>
+    </div>
+  </div>
+</div>
+
 <script src="app.js"></script>
 </body>
 </html>

@@ -1,10 +1,9 @@
 /**
  * Mantis Desktop — Electron main process.
  *
- * Reuses the existing Mantis engine (config, providers, the streaming LLM
- * client) and exposes it to the renderer over IPC. Phase 1: general chat with
- * persistent, resumable history. Projects (agent mode) and git integration
- * land in later phases.
+ * Reuses the existing Mantis engine and exposes it to the renderer over IPC.
+ * Phase 1: general chat with persistent history.
+ * Phase 2: projects — agent-mode sessions bound to a folder, with a file tree.
  */
 
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
@@ -12,19 +11,20 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { loadConfig, getConfig, saveConfig, PROVIDERS } from '../src/config.js';
 import * as store from './store.js';
-import { runChatTurn, listModels } from './chat.js';
+import * as projects from './projects.js';
+import { runChatTurn, runAgentTurn, listModels } from './chat.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow = null;
-const running = new Map(); // sessionId -> { cancelled }
+const running = new Map(); // sessionId -> { cancelled, agent }
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 780,
-    minWidth: 940,
-    minHeight: 560,
+    width: 1240,
+    height: 800,
+    minWidth: 980,
+    minHeight: 580,
     backgroundColor: '#0d1117',
     title: 'Mantis',
     autoHideMenuBar: true,
@@ -77,6 +77,18 @@ ipcMain.handle('sessions:create', (_e, opts) => store.createSession(opts || {}))
 ipcMain.handle('sessions:delete', (_e, id) => store.remove(id));
 ipcMain.handle('sessions:rename', (_e, { id, title }) => store.rename(id, title));
 
+// ─── Project IPC ────────────────────────────────────────────────────
+
+ipcMain.handle('projects:list', () => projects.list());
+ipcMain.handle('projects:get', (_e, id) => projects.get(id));
+ipcMain.handle('projects:create', (_e, opts) => projects.create(opts || {}));
+ipcMain.handle('projects:openExisting', (_e, dir) => projects.openExisting(dir));
+ipcMain.handle('projects:remove', (_e, id) => projects.remove(id));
+ipcMain.handle('projects:children', (_e, dir) => projects.children(dir));
+ipcMain.handle('projects:readFile', (_e, file) => projects.readFile(file));
+ipcMain.handle('projects:browse', (_e, p) => projects.browse(p));
+ipcMain.handle('projects:workspace', () => projects.workspaceRoot());
+
 // ─── Config IPC ─────────────────────────────────────────────────────
 
 ipcMain.handle('config:get', () => {
@@ -115,35 +127,50 @@ ipcMain.handle('chat:send', async (_e, { sessionId, text }) => {
   const session = store.get(sessionId);
   if (!session) return { error: 'No such session' };
 
-  session.messages.push({ role: 'user', content: text });
-  // Auto-title from the first user message.
-  if (session.messages.filter(m => m.role === 'user').length === 1) {
-    const t = text.replace(/\s+/g, ' ').trim().slice(0, 48);
-    if (t) session.title = t;
-  }
-  store.save(session);
-
-  const ctl = { cancelled: false };
+  const isFirstUserMsg = !session.messages.some(m => m.role === 'user');
+  const ctl = { cancelled: false, agent: null };
   running.set(sessionId, ctl);
 
-  let full = '';
+  const cb = {
+    onText: (t) => toRenderer('chat:token', { sessionId, text: t }),
+    onToolCall: (name, args) => toRenderer('chat:tool', { sessionId, name, args }),
+    onToolResult: (name, result) =>
+      toRenderer('chat:toolresult', { sessionId, name, result: String(result).slice(0, 700) }),
+    onError: (err) => toRenderer('chat:error', { sessionId, error: err }),
+    onThinking: (b) => toRenderer('chat:thinking', { sessionId, thinking: b }),
+  };
+
   let errored = false;
   try {
-    const assistant = await runChatTurn(session, {
-      onText: (t) => { full += t; toRenderer('chat:token', { sessionId, text: t }); },
-      onError: (err) => { errored = true; toRenderer('chat:error', { sessionId, error: err }); },
-      onThinking: (b) => toRenderer('chat:thinking', { sessionId, thinking: b }),
-    }, () => ctl.cancelled);
-    if (assistant && assistant.content) full = assistant.content;
+    if (session.mode === 'agent') {
+      const project = session.projectId ? projects.get(session.projectId) : null;
+      if (!project) {
+        errored = true;
+        cb.onError('The project for this session no longer exists.');
+      } else {
+        await runAgentTurn(session, project, text, cb, ctl);
+      }
+    } else {
+      session.messages.push({ role: 'user', content: text });
+      let full = '';
+      const assistant = await runChatTurn(session, {
+        onText: (t) => { full += t; cb.onText(t); },
+        onError: (e) => { errored = true; cb.onError(e); },
+        onThinking: cb.onThinking,
+      }, () => ctl.cancelled);
+      if (assistant && assistant.content) full = assistant.content;
+      if (full && !ctl.cancelled) session.messages.push({ role: 'assistant', content: full });
+    }
   } catch (err) {
     errored = true;
-    toRenderer('chat:error', { sessionId, error: err.message });
+    cb.onError(err.message);
   }
 
   running.delete(sessionId);
 
-  if (full && !ctl.cancelled) {
-    session.messages.push({ role: 'assistant', content: full });
+  if (isFirstUserMsg) {
+    const t = text.replace(/\s+/g, ' ').trim().slice(0, 48);
+    if (t) session.title = t;
   }
   store.save(session);
 
@@ -153,6 +180,9 @@ ipcMain.handle('chat:send', async (_e, { sessionId, text }) => {
 
 ipcMain.handle('chat:stop', (_e, sessionId) => {
   const ctl = running.get(sessionId);
-  if (ctl) ctl.cancelled = true;
+  if (ctl) {
+    ctl.cancelled = true;
+    if (ctl.agent) ctl.agent.cancel();
+  }
   return { ok: true };
 });
