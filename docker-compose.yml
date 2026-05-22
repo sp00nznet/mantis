@@ -1,0 +1,26 @@
+# Mantis — proxy + admin UI in a container.
+#
+#   docker compose up -d        # start
+#   docker compose logs -f      # follow logs
+#   docker compose down         # stop
+#
+# Config and per-user data persist in the named volume (mounted at /root/.mantis).
+# Set "proxy.host" to "0.0.0.0" in that config so the proxy is reachable, and
+# run `docker compose exec mantis mantis auth admin <user> <pass>` to enable
+# sign-in before exposing the admin UI beyond localhost.
+
+services:
+  mantis:
+    build: .
+    image: mantis
+    restart: unless-stopped
+    ports:
+      - "8787:8787"   # Anthropic-compatible proxy
+      - "8788:8788"   # admin UI
+    volumes:
+      - mantis-data:/root/.mantis
+    # To run a chat bot instead of the proxy, override the command:
+    # command: ["node", "bin/mantis.js", "bot", "telegram"]
+
+volumes:
+  mantis-data:

@@ -77,10 +77,15 @@ Here's the full config with defaults:
 | `swarm` | object | — | Swarm-mode settings — see [Swarm Mode](swarm.md#swarm-configuration). |
 | `proxy` | object | — | Anthropic-compatible proxy settings — see [Proxy](proxy.md#tier-routing). |
 | `bots` | object | — | Telegram / Discord bot tokens — see [Chat Bots](bots.md). |
+| `transcription` | object | — | Voice-note transcription — see [Chat Bots](bots.md#voice-notes). |
+| `hooks` | object | `{ afterEdit: [] }` | Shell commands run after the agent writes/edits a file. `{file}` is replaced with the path. e.g. `["npx prettier --write {file}"]`. |
+| `mcpServers` | object | `{}` | MCP servers whose tools are added to the agent — see [MCP Servers](mcp.md). |
 | `admin` | object | — | Admin web UI port and host — see [Proxy & Admin UI](proxy.md#admin-ui). |
+| `auth` | object | — | Sign-in / multi-user settings — see [Sign-in & Multi-user](auth.md). |
 
 Nested objects are deep-merged with defaults on load, so an older `config.json`
-that predates `proxy`, `bots`, or `admin` still picks up their default values.
+that predates `proxy`, `hooks`, `mcpServers`, or `auth` still picks up their
+default values.
 
 ---
 

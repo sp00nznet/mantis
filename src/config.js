@@ -229,6 +229,15 @@ const DEFAULTS = {
     provider: 'groq',
     model: '',
   },
+  // Shell commands run after the agent writes or edits a file. The token
+  // {file} is replaced with the changed file's path. Output is fed back to
+  // the model. Empty by default — e.g. ["npx prettier --write {file}"].
+  hooks: {
+    afterEdit: [],
+  },
+  // MCP (Model Context Protocol) servers — their tools are added to the agent.
+  // stdio: { command, args, env }   ·   http: { url, headers }
+  mcpServers: {},
   // Local admin web UI. See `mantis admin`.
   admin: {
     port: 8788,
@@ -261,7 +270,7 @@ export function loadConfig() {
       config = { ...DEFAULTS, ...saved };
       // Deep-merge nested config objects so new default keys survive an old
       // config.json that predates them (shallow spread would drop them).
-      for (const k of ['swarm', 'proxy', 'bots', 'transcription', 'admin', 'auth', 'google']) {
+      for (const k of ['swarm', 'proxy', 'bots', 'transcription', 'hooks', 'admin', 'auth', 'google']) {
         config[k] = { ...DEFAULTS[k], ...(saved[k] || {}) };
       }
       config.proxy.routes = { ...DEFAULTS.proxy.routes, ...(saved.proxy?.routes || {}) };

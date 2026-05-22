@@ -8,6 +8,7 @@ function printUsage() {
 
   Usage:
     mantis                   Start the interactive REPL
+    mantis run "<task>"      Run one task headlessly (for scripts / CI)
     mantis serve             Start the Anthropic-compatible proxy server
     mantis admin             Start the admin web UI
     mantis bot telegram      Run the Telegram bot
@@ -69,6 +70,35 @@ async function main() {
         // startup error — the bot module already printed a friendly reason
         process.exit(1);
       }
+      break;
+    }
+
+    case 'run': {
+      const rest = process.argv.slice(3);
+      const opts = { json: false };
+      const positional = [];
+      for (let i = 0; i < rest.length; i++) {
+        const a = rest[i];
+        if (a === '--json') opts.json = true;
+        else if (a === '--cwd') opts.cwd = rest[++i];
+        else if (a === '--provider') opts.provider = rest[++i];
+        else if (a === '--model') opts.model = rest[++i];
+        else positional.push(a);
+      }
+      const task = positional.join(' ').trim();
+      if (!task) {
+        console.error('  Usage: mantis run "<task>" [--json] [--cwd <dir>] [--provider <name>] [--model <name>]');
+        process.exit(1);
+      }
+      const { runHeadless } = await import('../src/headless.js');
+      let ok = false;
+      try {
+        ok = await runHeadless(task, opts);
+      } catch (err) {
+        console.error(`  Headless run failed: ${err.message}`);
+        process.exit(1);
+      }
+      process.exit(ok ? 0 : 1);
       break;
     }
 

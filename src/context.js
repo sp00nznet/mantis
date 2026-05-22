@@ -15,7 +15,15 @@ function estimateTokens(text) {
 
 function estimateMessageTokens(msg) {
   let tokens = 4; // message overhead
-  if (msg.content) tokens += estimateTokens(msg.content);
+  if (typeof msg.content === 'string') {
+    tokens += estimateTokens(msg.content);
+  } else if (Array.isArray(msg.content)) {
+    // Multi-part content (vision messages): text parts + a flat cost per image.
+    for (const part of msg.content) {
+      if (part?.type === 'text') tokens += estimateTokens(part.text);
+      else if (part?.type === 'image_url') tokens += 1000;
+    }
+  }
   if (msg.tool_calls) {
     for (const tc of msg.tool_calls) {
       tokens += estimateTokens(tc.function?.name || '');
@@ -31,6 +39,17 @@ export function countContextTokens(messages) {
     total += estimateMessageTokens(msg);
   }
   return total;
+}
+
+/** Flatten a message's content to plain text (handles vision array content). */
+function contentText(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    const text = content.filter(p => p?.type === 'text').map(p => p.text || '').join(' ');
+    const hasImg = content.some(p => p?.type === 'image_url');
+    return text + (hasImg ? ' [image]' : '');
+  }
+  return '';
 }
 
 export function shouldCompact(messages) {
@@ -61,13 +80,13 @@ export function compactMessages(messages) {
 
   for (const msg of older) {
     if (msg.role === 'user') {
-      const preview = (msg.content || '').slice(0, 150);
+      const preview = contentText(msg.content).slice(0, 150);
       summaryParts.push(`- User asked: ${preview}`);
     } else if (msg.role === 'assistant' && msg.tool_calls) {
       const tools = msg.tool_calls.map(tc => tc.function?.name).join(', ');
       summaryParts.push(`- Assistant used tools: ${tools}`);
     } else if (msg.role === 'assistant' && msg.content) {
-      const preview = (msg.content || '').slice(0, 150);
+      const preview = contentText(msg.content).slice(0, 150);
       summaryParts.push(`- Assistant responded: ${preview}`);
     }
     // Skip tool result messages in summary — too verbose

@@ -1,0 +1,11 @@
+# Keep the build context small and the image clean.
+.git
+node_modules
+desktop
+docs
+assets
+*.md
+.env
+.DS_Store
+npm-debug.log*
+_mock-*

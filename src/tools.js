@@ -1,8 +1,10 @@
 import fs from 'fs';
 import path from 'path';
-import { exec } from 'child_process';
+import { exec, execSync } from 'child_process';
 import { truncate } from './utils.js';
 import { getConfig } from './config.js';
+import { recordChange } from './checkpoints.js';
+import { webFetch, webSearch } from './web.js';
 import {
   loadGlobalMemory, loadProjectMemory, loadAllMemory,
   saveGlobalMemory, saveProjectMemory,
@@ -14,6 +16,7 @@ import {
 
 let workingDirectory = process.cwd();
 let planMode = false;
+let _subagentDepth = 0; // guards against sub-agents spawning sub-agents
 
 export function setWorkingDirectory(dir) {
   workingDirectory = dir;
@@ -62,6 +65,9 @@ export async function executeTool(name, args) {
     if (name === 'run_command' && !isReadOnlyCommand(args.command || '')) {
       return `BLOCKED: Plan mode is active. Only read-only commands are allowed. Command "${args.command}" appears to modify state. Use /plan to exit plan mode first.`;
     }
+    if (name.startsWith('mcp__')) {
+      return `BLOCKED: Plan mode is active. MCP tools may modify state and are disabled. Use /plan to exit plan mode first.`;
+    }
   }
 
   try {
@@ -76,11 +82,55 @@ export async function executeTool(name, args) {
       case 'save_memory': return saveMemoryTool(args);
       case 'read_memory': return readMemoryTool(args);
       case 'delete_memory': return deleteMemoryTool(args);
-      default: return `Unknown tool: ${name}`;
+      case 'web_fetch': return await webFetch(args.url);
+      case 'web_search': return await webSearch(args.query);
+      case 'run_subagent': return await runSubagent(args);
+      default:
+        // MCP tools are namespaced mcp__<server>__<tool>.
+        if (name.startsWith('mcp__')) {
+          const { callMcpTool } = await import('./mcp.js');
+          return await callMcpTool(name, args);
+        }
+        return `Unknown tool: ${name}`;
     }
   } catch (err) {
     return `Error: ${err.message}`;
   }
+}
+
+// ─── Sub-agent ───────────────────────────────────────────────────────
+
+async function runSubagent({ task }) {
+  if (!task || !task.trim()) return 'Error: run_subagent needs a task description.';
+  if (_subagentDepth >= 1) {
+    return 'Error: a sub-agent cannot spawn another sub-agent. Complete this subtask directly.';
+  }
+  // Dynamic import avoids a static tools.js <-> agent.js import cycle.
+  const { createAgent } = await import('./agent.js');
+  _subagentDepth++;
+  const sub = createAgent();
+  let text = '';
+  const toolsUsed = [];
+  try {
+    await sub.chat(task, {
+      maxLoops: 30,
+      onText: (t) => { text += t; },
+      onToolCall: (name) => { toolsUsed.push(name); },
+      onToolResult: () => {},
+      onError: (e) => { text += `\n[sub-agent error: ${e}]`; },
+      onConfirmToolCall: async () => true, // sub-agents auto-approve
+      onThinking: () => {},
+      onToken: () => {},
+      onCompact: () => {},
+    });
+  } catch (err) {
+    return `Sub-agent failed: ${err.message}`;
+  } finally {
+    _subagentDepth--;
+  }
+  const report = text.trim() || '(the sub-agent finished without a written summary)';
+  const n = toolsUsed.length;
+  return `Sub-agent completed the task (${n} tool call${n === 1 ? '' : 's'}).\n\n${report}`;
 }
 
 function readFile({ path: filePath, start_line, end_line }) {
@@ -117,15 +167,39 @@ function readFile({ path: filePath, start_line, end_line }) {
   return `${resolved} (${lines.length} lines):\n${truncate(numbered, maxResult)}`;
 }
 
+// Run the configured post-edit hooks for a file; returns text to append to
+// the tool result so the model sees lint/format/test output.
+function runEditHooks(filePath) {
+  const hooks = getConfig().hooks?.afterEdit || [];
+  if (!Array.isArray(hooks) || hooks.length === 0) return '';
+  const out = [];
+  for (const raw of hooks) {
+    if (!raw || typeof raw !== 'string') continue;
+    const cmd = raw.replace(/\{file\}/g, filePath);
+    try {
+      const r = execSync(cmd, {
+        cwd: workingDirectory, encoding: 'utf-8', timeout: 60000,
+        stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+      });
+      out.push(`$ ${cmd}\n${(r || '').trim() || '(ok)'}`);
+    } catch (err) {
+      const o = ((err.stdout || '') + '\n' + (err.stderr || '')).trim();
+      out.push(`$ ${cmd}\n[exit ${err.status ?? '?'}] ${o || err.message}`);
+    }
+  }
+  return out.length ? '\n\n— post-edit hooks —\n' + truncate(out.join('\n'), 2500) : '';
+}
+
 function writeFile({ path: filePath, content }) {
   const resolved = resolvePath(filePath);
   const dir = path.dirname(resolved);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+  recordChange(resolved);
   fs.writeFileSync(resolved, content, 'utf-8');
   const lineCount = content.split('\n').length;
-  return `File written: ${resolved} (${lineCount} lines, ${content.length} bytes)`;
+  return `File written: ${resolved} (${lineCount} lines, ${content.length} bytes)` + runEditHooks(resolved);
 }
 
 function editFile({ path: filePath, old_string, new_string, replace_all }) {
@@ -145,8 +219,9 @@ function editFile({ path: filePath, old_string, new_string, replace_all }) {
   if (replace_all) {
     // Replace ALL occurrences — useful for renaming variables/classes across a file
     const newContent = content.replaceAll(old_string, new_string);
+    recordChange(resolved);
     fs.writeFileSync(resolved, newContent, 'utf-8');
-    return `File edited: ${resolved} (replaced ${occurrences} occurrence${occurrences > 1 ? 's' : ''}, ${newContent.split('\n').length} lines total)`;
+    return `File edited: ${resolved} (replaced ${occurrences} occurrence${occurrences > 1 ? 's' : ''}, ${newContent.split('\n').length} lines total)` + runEditHooks(resolved);
   }
 
   if (occurrences > 1) {
@@ -154,8 +229,9 @@ function editFile({ path: filePath, old_string, new_string, replace_all }) {
   }
 
   const newContent = content.replace(old_string, new_string);
+  recordChange(resolved);
   fs.writeFileSync(resolved, newContent, 'utf-8');
-  return `File edited: ${resolved} (replaced 1 occurrence, ${newContent.split('\n').length} lines total)`;
+  return `File edited: ${resolved} (replaced 1 occurrence, ${newContent.split('\n').length} lines total)` + runEditHooks(resolved);
 }
 
 function runCommand({ command, cwd }) {

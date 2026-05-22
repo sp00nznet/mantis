@@ -11,6 +11,8 @@ import { getAllSkills, getSkill, saveSkill, deleteSkill, expandSkillPrompt, matc
 import { loadAllMemory, clearGlobalMemory, clearProjectMemory, getMemoryStats, loadHandoff, clearHandoff, parseHandoffTasks } from './memory.js';
 import { colors, formatToolCall, truncate, contextBar, formatDuration } from './utils.js';
 import { getSwarmPool, selectLead, runSwarm, excludeFromSwarm, includeInSwarm, classifyComplexity } from './swarm.js';
+import { formatCost } from './pricing.js';
+import { undoLast, checkpointCount, clearCheckpoints } from './checkpoints.js';
 
 // Module-level state for interrupt handling
 let _isBusy = false;
@@ -23,6 +25,7 @@ let _autonomousMode = false; // when true, running in autonomous mode
 let _proxyServer = null;   // running proxy server instance, if any
 let _adminServer = null;   // running admin server instance, if any
 let _remoteSession = null; // hub session mirroring this REPL, if /remote is on
+let _pendingImages = []; // data-URL images staged with /image for the next message
 
 // Process-level SIGINT fallback.
 // In raw mode, Ctrl+C produces byte 0x03 which readline handles (rl.on('SIGINT')).
@@ -58,6 +61,9 @@ export async function startCLI() {
   setWorkingDirectory(cwd);
   loadConfig();
   const config = getConfig();
+
+  // Begin connecting to any configured MCP servers in the background.
+  import('./mcp.js').then(m => m.initMcp()).catch(() => {});
 
   const providerInfo = PROVIDERS[config.provider] || PROVIDERS.local;
   const providerLabel = config.provider === 'local'
@@ -263,9 +269,14 @@ async function handleUserInput(input, rl, agent, opts = {}) {
   const prevAutoApprove = _autoApprove;
   if (isAutonomous) _autoApprove = true;
 
+  // Attach any images staged with /image, then clear the queue.
+  const turnImages = _pendingImages.length ? _pendingImages.slice() : undefined;
+  _pendingImages = [];
+
   try {
     await Promise.race([cancelPromise, agent.chat(input, {
       maxLoops,
+      images: turnImages,
       onToken: (count) => {
         if (!streamStartTime) streamStartTime = Date.now();
         tokenCount += count;
@@ -613,8 +624,20 @@ async function handleCommand(cmd, rl, agent, ask) {
 
     case '/clear':
       agent.clearHistory();
+      clearCheckpoints();
       console.log(colors.dim('  Conversation cleared.\n'));
       break;
+
+    case '/undo': {
+      const r = undoLast();
+      if (r.error) {
+        console.log(colors.dim('  ' + r.error + '\n'));
+      } else {
+        console.log(colors.success(`  Undone: ${r.path}`));
+        console.log(colors.dim(`  ${r.action} — ${checkpointCount()} change(s) still undoable.\n`));
+      }
+      break;
+    }
 
     case '/help':
       printHelp();
@@ -656,9 +679,60 @@ async function handleCommand(cmd, rl, agent, ask) {
   Messages:    ${stats.messageCount}
   Tool calls:  ${stats.totalToolCalls}
   Turns:       ${stats.totalTurns}
+  Tokens used: ${stats.tokens.total.toLocaleString()} (${stats.tokens.prompt.toLocaleString()} in / ${stats.tokens.completion.toLocaleString()} out)
+  Est. cost:   ${stats.costKnown ? formatCost(stats.cost) : formatCost(stats.cost) + ' (pricing unknown for some models)'}
   Skills:      ${skills.length} available
   Memory:      ${memSummary}
 `);
+      break;
+    }
+
+    case '/mcp': {
+      const { mcpStatus } = await import('./mcp.js');
+      const servers = mcpStatus();
+      if (!servers.length) {
+        console.log(colors.dim('\n  No MCP servers configured.'));
+        console.log(colors.dim('  Add them under "mcpServers" in ~/.mantis/config.json — see docs/mcp.md.\n'));
+      } else {
+        console.log('\n  ' + colors.header('MCP servers'));
+        for (const s of servers) {
+          const state = s.connected
+            ? colors.success(`connected · ${s.tools} tool${s.tools === 1 ? '' : 's'}`)
+            : colors.error('not connected' + (s.error ? ` (${s.error})` : ''));
+          console.log(`  ${s.name} ${colors.dim('(' + s.transport + ')')} — ${state}`);
+        }
+        console.log('');
+      }
+      break;
+    }
+
+    case '/image':
+    case '/img': {
+      if (!args) {
+        console.log(colors.dim(`  ${_pendingImages.length} image(s) staged for the next message.`));
+        console.log(colors.dim('  Usage: /image <path>  — attach an image to your next message.\n'));
+        break;
+      }
+      const imgPath = path.resolve(getWorkingDirectory(), args.replace(/^["']|["']$/g, ''));
+      if (!fs.existsSync(imgPath)) {
+        console.log(colors.error(`  File not found: ${imgPath}\n`));
+        break;
+      }
+      const ext = path.extname(imgPath).toLowerCase().slice(1);
+      const mimes = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+      if (!mimes[ext]) {
+        console.log(colors.error('  Unsupported image type — use png, jpg, gif, or webp.\n'));
+        break;
+      }
+      const size = fs.statSync(imgPath).size;
+      if (size > 8 * 1024 * 1024) {
+        console.log(colors.error('  Image is too large (over 8 MB).\n'));
+        break;
+      }
+      const b64 = fs.readFileSync(imgPath).toString('base64');
+      _pendingImages.push(`data:${mimes[ext]};base64,${b64}`);
+      console.log(colors.success(`  Image attached (${(size / 1024).toFixed(0)} KB) — ${_pendingImages.length} staged.`));
+      console.log(colors.dim('  Send your message now to include it. Make sure your model supports image input.\n'));
       break;
     }
 
@@ -1710,14 +1784,17 @@ function printHelp() {
   ${colors.toolName('/help')}              Show this help
   ${colors.toolName('/exit')}              Exit Mantis
   ${colors.toolName('/clear')}             Clear conversation history
+  ${colors.toolName('/undo')}              Revert the last file change the agent made
+  ${colors.toolName('/image <path>')}      Attach an image to your next message (vision)
   ${colors.toolName('/plan')}              Toggle plan mode (explore without changes)
-  ${colors.toolName('/status')}            Show session status (tokens, model, etc.)
+  ${colors.toolName('/status')}            Show session status (tokens, cost, model, etc.)
   ${colors.toolName('/cd <dir>')}          Change working directory
   ${colors.toolName('/save [name]')}       Save conversation to disk
   ${colors.toolName('/load [name]')}       Load a saved conversation
   ${colors.toolName('/compact')}           Manually compact conversation history
   ${colors.toolName('/model <name>')}      Switch to a different model
   ${colors.toolName('/config')}            Show current configuration
+  ${colors.toolName('/mcp')}               Show connected MCP servers and their tools
 
   ${colors.header('Providers')}
   ${colors.toolName('/provider')}          Show current provider

@@ -224,11 +224,62 @@ export const toolDefinitions = [
         required: ["scope"]
       }
     }
+  },
+  {
+    type: "function",
+    function: {
+      name: "web_fetch",
+      description: "Download a web page or URL and return its readable text content. Use to read documentation, changelogs, issue trackers, or any page the user references.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: {
+            type: "string",
+            description: "The http(s) URL to fetch"
+          }
+        },
+        required: ["url"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "web_search",
+      description: "Search the web and return results. Use to look up current information, library docs, error messages, or APIs you are unsure about. Follow up with web_fetch to read a result in full.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "The search query"
+          }
+        },
+        required: ["query"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "run_subagent",
+      description: "Delegate a focused subtask to a fresh sub-agent that has its own context and the full tool set. Use for self-contained work — exploring an unfamiliar area, implementing one module, or researching — so the main conversation stays uncluttered. The sub-agent cannot see this conversation, so the task must be fully self-described. Returns the sub-agent's final report.",
+      parameters: {
+        type: "object",
+        properties: {
+          task: {
+            type: "string",
+            description: "A complete, self-contained description of the subtask, including all context the sub-agent needs."
+          }
+        },
+        required: ["task"]
+      }
+    }
   }
 ];
 
 // Read-only subset for swarm workers — no write/edit/run capabilities
 export const readOnlyToolDefinitions = toolDefinitions.filter(t =>
-  ['read_file', 'list_files', 'search_files', 'find_files', 'read_memory']
+  ['read_file', 'list_files', 'search_files', 'find_files', 'read_memory', 'web_fetch', 'web_search']
     .includes(t.function.name)
 );

@@ -99,6 +99,8 @@ class Session {
       messages: stats ? stats.messageCount : 0,
       toolCalls: stats ? stats.totalToolCalls : 0,
       contextPct: stats ? stats.pct : 0,
+      tokens: stats ? stats.tokens.total : 0,
+      cost: stats ? stats.cost : 0,
     };
   }
 }

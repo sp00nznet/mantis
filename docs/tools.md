@@ -1,6 +1,6 @@
 # Tools Reference
 
-Mantis gives the AI model 10 tools to interact with your system. The model decides which tools to use and when — you just describe what you want done.
+Mantis gives the AI model 13 built-in tools to interact with your system. The model decides which tools to use and when — you just describe what you want done. Connected [MCP servers](mcp.md) add more tools on top.
 
 ---
 
@@ -243,3 +243,52 @@ Clears persistent memory.
 - Deletes the memory file for the specified scope
 - Cannot be undone — the file is removed from disk
 - The model uses this when asked to "forget everything" or "clear memory"
+
+## web_fetch
+
+Downloads a URL and returns its readable text content (HTML is stripped to text).
+
+**Parameters:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `url` | string | yes | The http(s) URL to fetch |
+
+**Behavior:**
+- Used to read documentation, changelogs, issue trackers, or any referenced page
+- Output is capped at ~12,000 characters
+
+## web_search
+
+Searches the web and returns results.
+
+**Parameters:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `query` | string | yes | The search query |
+
+**Behavior:**
+- Uses Perplexity `sonar` when a Perplexity API key is configured, otherwise a
+  keyless DuckDuckGo search
+- The model follows up with `web_fetch` to read a result in full
+
+## run_subagent
+
+Delegates a focused subtask to a fresh sub-agent with its own context and the
+full tool set.
+
+**Parameters:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `task` | string | yes | A complete, self-contained description of the subtask |
+
+**Behavior:**
+- Keeps the main conversation uncluttered for self-contained work
+- The sub-agent cannot see the main conversation — the task must be fully described
+- A sub-agent cannot spawn another sub-agent
+
+---
+
+## MCP tools
+
+When [MCP servers](mcp.md) are configured, their tools appear to the model as
+`mcp__<server>__<tool>` and are used exactly like the built-in tools.

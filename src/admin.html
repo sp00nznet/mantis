@@ -1086,7 +1086,7 @@ function renderSessions() {
     chip.innerHTML =
       '<span class="sdot ' + s.status + '"></span>' +
       '<span>' + s.name + '</span>' +
-      '<span class="meta">' + s.origin + ' · ' + s.contextPct + '%</span>' +
+      '<span class="meta">' + s.origin + ' · ' + s.contextPct + '% · $' + (s.cost || 0).toFixed(3) + '</span>' +
       '<span class="x" title="delete">✕</span>';
     chip.onclick = function(ev){
       if (ev.target.classList.contains('x')) { deleteSession(s.id); return; }

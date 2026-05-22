@@ -10,6 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import { createAgent } from './agent.js';
 import { setWorkingDirectory, getWorkingDirectory } from './tools.js';
+import { formatCost } from './pricing.js';
 
 /**
  * Create an isolated bot session backed by a Mantis agent.
@@ -114,7 +115,8 @@ export async function runBotCommand(text, session) {
       return 'Working directory: ' + getWorkingDirectory();
     case 'status': {
       const s = session.stats();
-      return `Messages: ${s.messageCount} · tool calls: ${s.totalToolCalls} · context: ${s.pct}%`;
+      return `Messages: ${s.messageCount} · tool calls: ${s.totalToolCalls} · context: ${s.pct}%` +
+        ` · ${s.tokens.total.toLocaleString()} tokens · ${formatCost(s.cost)}${s.costKnown ? '' : ' (est.)'}`;
     }
     default:
       return `Unknown command: /${cmd}. Send /help for the list.`;

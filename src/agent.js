@@ -4,6 +4,8 @@ import { executeTool, getWorkingDirectory, getPlanMode } from './tools.js';
 import { getConfig, PROVIDERS, buildConnection } from './config.js';
 import { shouldCompact, compactMessages, countContextTokens, getContextStats } from './context.js';
 import { classifyHttpError } from './errors.js';
+import { estimateCost } from './pricing.js';
+import { initMcp, getMcpTools } from './mcp.js';
 
 // ─── Per-Provider Rate Limiter ──────────────────────────────────────
 // Enforces RPM/RPD limits from provider config AND adaptively backs off when
@@ -116,6 +118,9 @@ export function createAgent(agentOpts = {}) {
   let totalTurns = 0;
   let _cancelled = false;
   const _prefs = agentOpts.prefs || null; // per-user provider/model/keys, or null = global config
+  const usage = { prompt: 0, completion: 0 }; // cumulative token usage this session
+  let cost = 0;            // cumulative estimated USD cost
+  let costKnown = true;    // false once a model with no known pricing is used
 
   function initSystem() {
     if (!initialized) {
@@ -134,10 +139,18 @@ export function createAgent(agentOpts = {}) {
     }
   }
 
-  async function chat(userMessage, { onText, onToolCall, onToolResult, onError, onCompact, onThinking, onToken, onConfirmToolCall, signal, maxLoops: loopLimit }) {
+  async function chat(userMessage, { onText, onToolCall, onToolResult, onError, onCompact, onThinking, onToken, onConfirmToolCall, signal, maxLoops: loopLimit, images }) {
     initSystem();
     _cancelled = false;
-    messages.push({ role: 'user', content: userMessage });
+    // With images, the user turn becomes multi-part content (OpenAI vision format).
+    let userContent = userMessage;
+    if (Array.isArray(images) && images.length) {
+      userContent = [
+        { type: 'text', text: userMessage || '(see the attached image)' },
+        ...images.map(url => ({ type: 'image_url', image_url: { url } })),
+      ];
+    }
+    messages.push({ role: 'user', content: userContent });
     totalTurns++;
 
     if (shouldCompact(messages)) {
@@ -158,6 +171,11 @@ export function createAgent(agentOpts = {}) {
     }
     const { url, headers, provider, model } = conn;
 
+    // Connect to MCP servers (cached after the first call) and offer their
+    // tools alongside the built-in ones.
+    await initMcp();
+    const effectiveTools = toolDefinitions.concat(getMcpTools());
+
     let loopCount = 0;
     const maxLoops = loopLimit || 25;
     let nudgeCount = 0;     // how many auto-continue nudges we've sent
@@ -166,8 +184,19 @@ export function createAgent(agentOpts = {}) {
 
     while (loopCount < maxLoops && !_cancelled) {
       loopCount++;
-      const assistantMessage = await callLLM(url, model, messages, headers, provider, { onText, onError, onThinking, onToken, signal }, () => _cancelled);
+      const assistantMessage = await callLLM(url, model, messages, headers, provider, { onText, onError, onThinking, onToken, signal, tools: effectiveTools }, () => _cancelled);
       if (!assistantMessage || _cancelled) return;
+
+      // Accumulate token usage / cost when the provider reported it.
+      if (assistantMessage.usage) {
+        const u = assistantMessage.usage;
+        usage.prompt += u.prompt_tokens || 0;
+        usage.completion += u.completion_tokens || 0;
+        const c = estimateCost(providerKey, model, u.prompt_tokens || 0, u.completion_tokens || 0);
+        cost += c.cost;
+        if (!c.known) costKnown = false;
+        delete assistantMessage.usage; // don't carry it back into the history
+      }
 
       // Fallback: if the model wrote tool calls as JSON text instead of using
       // structured tool_calls, parse them from the text and execute anyway.
@@ -256,6 +285,10 @@ export function createAgent(agentOpts = {}) {
     initialized = false;
     totalToolCalls = 0;
     totalTurns = 0;
+    usage.prompt = 0;
+    usage.completion = 0;
+    cost = 0;
+    costKnown = true;
   }
 
   function getMessages() { return messages; }
@@ -272,6 +305,9 @@ export function createAgent(agentOpts = {}) {
       messageCount: messages.length,
       totalToolCalls,
       totalTurns,
+      tokens: { ...usage, total: usage.prompt + usage.completion },
+      cost,
+      costKnown,
     };
   }
 
@@ -297,6 +333,7 @@ export async function callLLM(url, model, messages, headers, provider, { onText,
     messages,
     tools: tools || toolDefinitions,
     stream: true,
+    stream_options: { include_usage: true }, // ask for a final token-usage chunk
   };
 
   if (onThinking) onThinking(true);
@@ -371,6 +408,7 @@ export async function callLLM(url, model, messages, headers, provider, { onText,
   let contentParts = [];
   let toolCalls = {};
   let firstToken = true;
+  let usage = null;        // token-usage chunk, when the provider sends one
 
   while (true) {
     if (isCancelled()) {
@@ -410,6 +448,9 @@ export async function callLLM(url, model, messages, headers, provider, { onText,
       } catch {
         continue;
       }
+
+      // The usage chunk arrives last and carries no choices.
+      if (chunk.usage) usage = chunk.usage;
 
       const choice = chunk.choices?.[0];
       if (!choice) continue;
@@ -466,6 +507,7 @@ export async function callLLM(url, model, messages, headers, provider, { onText,
   const assistantMessage = { role: 'assistant' };
   if (fullContent) assistantMessage.content = fullContent;
   if (toolCallArray.length > 0) assistantMessage.tool_calls = toolCallArray;
+  if (usage) assistantMessage.usage = usage;
 
   // Clean success — let the limiter relax any adaptive 429 penalty.
   limiter.reward();

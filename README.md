@@ -52,6 +52,7 @@ mantis                   # interactive REPL
 Other entry points:
 
 ```bash
+mantis run "<task>"      # run one task headlessly (scripts / CI)
 mantis serve             # Anthropic-compatible proxy server
 mantis admin             # provider & config web UI
 mantis bot telegram      # run the Telegram bot
@@ -65,14 +66,23 @@ mantis bot discord       # run the Discord bot
 - **23 providers** — Ollama, LM Studio, and llama.cpp locally, or 20 cloud
   providers (OpenAI, Claude, Gemini, Groq, Cerebras, NVIDIA NIM, Kimi, Z.ai, and
   more). Switch with `/provider set`. See [docs/providers.md](docs/providers.md).
-- **10 built-in tools** — reads files, writes code, runs commands, searches the
-  codebase, does surgical edits. Reads before it writes; chains tools together.
+- **13 built-in tools** — reads files, writes code, runs commands, searches the
+  codebase, does surgical edits, **fetches/searches the web**. Reads before it
+  writes; chains tools together. Plus a **sub-agent** tool for delegating subtasks.
+- **MCP client** — connect [MCP servers](docs/mcp.md) (filesystem, GitHub,
+  Postgres, …) and their tools join the agent loop automatically.
 - **Autonomous mode** — `/auto "build a REST API"` and Mantis plans, writes,
   builds, tests, and delivers. 100-iteration limit, tool calls auto-approved.
 - **Swarm mode** — `/swarm "refactor the auth module"` runs ALL your providers in
   parallel: one leads, the rest explore as read-only workers. See [docs/swarm.md](docs/swarm.md).
+- **Checkpoints & undo** — every file change is snapshotted; `/undo` reverts it.
+- **Post-edit hooks** — auto-run a formatter/linter/tests after each edit.
+- **Cost & token tracking** — `/status` shows tokens used and estimated spend.
+- **Vision** — `/image <path>` attaches a screenshot or mockup for vision models.
+- **Headless mode** — `mantis run "<task>"` for scripts and CI (`--json` output).
 - **Anthropic-compatible proxy** — `mantis serve` lets the real Claude Code,
   VS Code, and JetBrains run on your provider pool. See [docs/proxy.md](docs/proxy.md).
+- **Docker** — `docker compose up` runs the proxy + admin UI in a container.
 - **Chat bots** — drive Mantis from Telegram or Discord, by text or **voice note**
   (transcribed automatically). See [docs/bots.md](docs/bots.md).
 - **Desktop app** — a Claude-style Electron app: general chat with persistent,
@@ -97,8 +107,11 @@ mantis bot discord       # run the Discord bot
 | `/help` | Show all commands |
 | `/exit` | Quit |
 | `/clear` | Wipe conversation history |
+| `/undo` | Revert the last file change the agent made |
 | `/plan` | Toggle plan mode (read-only exploration) |
-| `/status` | Token usage, model info, stats |
+| `/status` | Token usage, estimated cost, model info, stats |
+| `/image <path>` | Attach an image to your next message (vision) |
+| `/mcp` | Show connected MCP servers and their tools |
 | `/cd <dir>` | Change working directory |
 | `/save [name]` · `/load [name]` | Save / load conversations |
 | `/compact` | Manually compress history |
@@ -166,6 +179,7 @@ The full table — base URLs, default models, free-tier notes — is in
 | [Providers](docs/providers.md) | All 23 providers, base URLs, default models |
 | [Swarm Mode](docs/swarm.md) | Multi-provider parallel execution |
 | [Proxy](docs/proxy.md) | Anthropic-compatible proxy + admin UI |
+| [MCP Servers](docs/mcp.md) | Connecting MCP servers for extra tools |
 | [Sign-in & Multi-user](docs/auth.md) | Local accounts, roles, per-account workspaces |
 | [Chat Bots](docs/bots.md) | Telegram & Discord wrappers |
 | [Desktop App](docs/desktop.md) | The Claude-style Electron app |
