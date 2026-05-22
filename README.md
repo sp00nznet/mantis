@@ -79,7 +79,9 @@ mantis bot discord       # run the Discord bot
 - **Checkpoints & undo** — every file change is snapshotted; `/undo` reverts it.
 - **Post-edit hooks** — auto-run a formatter/linter/tests after each edit.
 - **Cost & token tracking** — `/status` shows tokens used and estimated spend.
-- **Vision** — `/image <path>` attaches a screenshot or mockup for vision models.
+- **Vision & file attachments** — `/image <path>` in the REPL, a 📎 button
+  in the desktop composer, and on each admin session — attach images (sent to
+  vision models) or text files (content inlined).
 - **Headless mode** — `mantis run "<task>"` for scripts and CI (`--json` output).
 - **Anthropic-compatible proxy** — `mantis serve` lets the real Claude Code,
   VS Code, and JetBrains run on your provider pool. See [docs/proxy.md](docs/proxy.md).
