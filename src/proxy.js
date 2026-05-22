@@ -4,7 +4,7 @@
  * Exposes /v1/messages (and friends) speaking the Anthropic Messages API, then
  * translates to/from the OpenAI chat-completions format and routes to Mantis's
  * provider pool. This lets the *real* Claude Code CLI, the VS Code extension,
- * and JetBrains ACP run on any of Mantis's 22 providers.
+ * and JetBrains ACP run on any of Mantis's 23 providers.
  *
  * Point a client at it with:  ANTHROPIC_BASE_URL=http://127.0.0.1:8787
  *

@@ -7,7 +7,7 @@ Guides for using and understanding Mantis. New here? Start with
 ## Setup & usage
 
 - [Getting Started](getting-started.md) — install, first session, troubleshooting
-- [Providers](providers.md) — all 22 providers, base URLs, default models, keys
+- [Providers](providers.md) — all 23 providers, base URLs, default models, keys
 - [Configuration](configuration.md) — `~/.mantis/config.json` reference
 
 ## Modes & features

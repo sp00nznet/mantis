@@ -1,6 +1,6 @@
 # Providers
 
-Mantis works with any OpenAI-compatible chat-completions API. **22 providers** are
+Mantis works with any OpenAI-compatible chat-completions API. **23 providers** are
 built in — switch between them with `/provider set <name>`.
 
 ---
@@ -9,7 +9,7 @@ built in — switch between them with `/provider set <name>`.
 
 ```
 > /provider               # show the current provider
-> /provider list          # list all 22 providers
+> /provider list          # list all 23 providers
 > /provider set gemini    # switch to Google Gemini
 > /provider key gemini KEY  # set the API key for a provider
 > /provider test          # verify the current provider responds
@@ -72,6 +72,7 @@ Qwen3-Coder, GLM, Kimi, and many more.
 | `mistral` | Mistral AI | `https://api.mistral.ai/v1` | `codestral-latest` | 1B tokens/month |
 | `kimi` | Kimi (Moonshot) | `https://api.moonshot.ai/v1` | `kimi-k2.6` | No |
 | `zai` | Z.ai (GLM) | `https://api.z.ai/api/paas/v4` | `glm-4.6` | No |
+| `deepseek` | DeepSeek | `https://api.deepseek.com` | `deepseek-chat` | No |
 
 ---
 

@@ -9,6 +9,7 @@
 
 import { getConfig } from '../config.js';
 import { createBotSession, runBotCommand, formatResult, chunkMessage } from '../bot-core.js';
+import { transcribeAudio } from '../transcribe.js';
 
 const TG_LIMIT = 4096;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -56,16 +57,48 @@ export async function startTelegramBot() {
     return sessions.get(chatId);
   }
 
+  /** Download a Telegram file by id. Returns { buffer } or { error }. */
+  async function downloadTgFile(fileId) {
+    const info = await tg('getFile', { file_id: fileId }).catch(() => null);
+    const filePath = info?.result?.file_path;
+    if (!filePath) return { error: 'Could not locate that file on Telegram.' };
+    try {
+      const r = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`, {
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!r.ok) return { error: `Telegram file download failed (HTTP ${r.status}).` };
+      return { buffer: Buffer.from(await r.arrayBuffer()) };
+    } catch (err) {
+      return { error: 'Voice download failed: ' + err.message };
+    }
+  }
+
   async function handleMessage(msg) {
     const chatId = msg.chat?.id;
-    const text = (msg.text || '').trim();
-    if (!chatId || !text) return;
+    if (!chatId) return;
 
     const fromId = String(msg.from?.id ?? '');
     if (allowed.length && !allowed.includes(fromId) && !allowed.includes(String(chatId))) {
       await send(chatId, '⛔ You are not on this bot\'s allowed list.');
       return;
     }
+
+    let text = (msg.text || '').trim();
+
+    // A voice note or audio message — transcribe it to text first.
+    const voice = msg.voice;
+    const audio = msg.audio;
+    if (!text && (voice || audio)) {
+      await send(chatId, '🎙️ Transcribing your voice note…');
+      const dl = await downloadTgFile((voice || audio).file_id);
+      if (dl.error) { await send(chatId, '⚠️ ' + dl.error); return; }
+      const name = voice ? 'voice.ogg' : (audio.file_name || 'audio.mp3');
+      const tr = await transcribeAudio(dl.buffer, name);
+      if (tr.error) { await send(chatId, '⚠️ ' + tr.error); return; }
+      text = tr.text;
+      await send(chatId, '📝 ' + text);
+    }
+    if (!text) return;
 
     const session = sessionFor(chatId);
 

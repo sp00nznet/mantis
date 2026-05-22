@@ -13,6 +13,7 @@
 
 import { getConfig } from '../config.js';
 import { createBotSession, runBotCommand, formatResult, chunkMessage } from '../bot-core.js';
+import { transcribeAudio } from '../transcribe.js';
 
 const DISCORD_LIMIT = 2000;
 const API = 'https://discord.com/api/v10';
@@ -53,6 +54,17 @@ export async function startDiscordBot() {
   }
   const typing = (channelId) => rest('POST', `/channels/${channelId}/typing`).catch(() => {});
 
+  /** Download an attachment by URL. Returns { buffer } or { error }. */
+  async function downloadUrl(url) {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(30000) });
+      if (!r.ok) return { error: `Attachment download failed (HTTP ${r.status}).` };
+      return { buffer: Buffer.from(await r.arrayBuffer()) };
+    } catch (err) {
+      return { error: 'Attachment download failed: ' + err.message };
+    }
+  }
+
   // ─── Sessions ─────────────────────────────────────────────────────
   const sessions = new Map(); // channelId -> session
   function sessionFor(channelId) {
@@ -67,17 +79,32 @@ export async function startDiscordBot() {
 
     const isDM = !d.guild_id;
     const mentioned = Array.isArray(d.mentions) && d.mentions.some(m => m.id === botUserId);
-    if (!isDM && !mentioned) return; // only respond when addressed
-
-    let content = (d.content || '')
-      .replace(new RegExp(`<@!?${botUserId}>`, 'g'), '')
-      .trim();
-    if (!content) return;
+    const replyingToBot = d.referenced_message?.author?.id === botUserId;
+    if (!isDM && !mentioned && !replyingToBot) return; // only respond when addressed
 
     if (allowed.length && !allowed.includes(String(d.author?.id))) {
       await send(d.channel_id, '⛔ You are not on this bot\'s allowed list.');
       return;
     }
+
+    let content = (d.content || '')
+      .replace(new RegExp(`<@!?${botUserId}>`, 'g'), '')
+      .trim();
+
+    // A voice message or audio attachment — transcribe it to text first.
+    if (!content && Array.isArray(d.attachments)) {
+      const audio = d.attachments.find(a => (a.content_type || '').startsWith('audio/'));
+      if (audio) {
+        await send(d.channel_id, '🎙️ Transcribing your voice message…');
+        const dl = await downloadUrl(audio.url);
+        if (dl.error) { await send(d.channel_id, '⚠️ ' + dl.error); return; }
+        const tr = await transcribeAudio(dl.buffer, audio.filename || 'voice.ogg');
+        if (tr.error) { await send(d.channel_id, '⚠️ ' + tr.error); return; }
+        content = tr.text;
+        await send(d.channel_id, '📝 ' + content);
+      }
+    }
+    if (!content) return;
 
     const session = sessionFor(d.channel_id);
 

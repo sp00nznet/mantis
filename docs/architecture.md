@@ -160,7 +160,7 @@ Key functions:
 The CLI calls `matchSkillCommand()` in its default case — so any `/unknown` command is checked against skills before showing an error.
 
 ### `src/config.js` — The Settings
-Manages `~/.mantis/config.json` with defaults, load, and save. Also contains the `PROVIDERS` registry — a constant object mapping 22 provider keys to their base URLs, default models, and auth requirements. Adding a new provider is as simple as adding an entry to this object. Exports `buildConnection()`, the shared URL/header/model resolver used by the proxy, bots, and admin UI.
+Manages `~/.mantis/config.json` with defaults, load, and save. Also contains the `PROVIDERS` registry — a constant object mapping 23 provider keys to their base URLs, default models, and auth requirements. Adding a new provider is as simple as adding an entry to this object. Exports `buildConnection()`, the shared URL/header/model resolver used by the proxy, bots, and admin UI.
 
 ### `src/utils.js` — The Paintbrush
 Chalk color definitions, tool call formatting, text truncation, duration formatting, context bar rendering.
@@ -202,7 +202,7 @@ adapters. See [Chat Bots](bots.md).
 
 ## The API Layer
 
-Mantis talks to any OpenAI-compatible `POST /v1/chat/completions` endpoint. The provider registry in `config.js` defines 22 providers, each with a base URL, default model, and auth requirements.
+Mantis talks to any OpenAI-compatible `POST /v1/chat/completions` endpoint. The provider registry in `config.js` defines 23 providers, each with a base URL, default model, and auth requirements.
 
 ### How provider switching works
 
@@ -243,7 +243,7 @@ data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"read","
 data: [DONE]
 ```
 
-The streaming parser in `agent.js` reassembles these fragments into complete messages. This format is the same across all 22 providers — that's the power of the OpenAI-compatible standard.
+The streaming parser in `agent.js` reassembles these fragments into complete messages. This format is the same across all 23 providers — that's the power of the OpenAI-compatible standard.
 
 ---
 

@@ -159,6 +159,13 @@ export const PROVIDERS = {
     defaultModel: 'glm-4.6',
     description: 'GLM-4.6 — OpenAI-compatible, cheap coding plan',
   },
+  deepseek: {
+    name: 'DeepSeek',
+    baseUrl: 'https://api.deepseek.com',
+    requiresKey: true,
+    defaultModel: 'deepseek-chat',
+    description: 'DeepSeek V3 — strong coding model at very low cost',
+  },
   lmstudio: {
     name: 'LM Studio (local)',
     baseUrl: 'http://localhost:1234/v1',
@@ -214,6 +221,14 @@ const DEFAULTS = {
     telegram: { token: '', allowedUsers: [] },  // allowedUsers: numeric chat IDs ([] = allow all)
     discord:  { token: '', allowedUsers: [] },  // allowedUsers: user IDs ([] = allow all)
   },
+  // Voice-note transcription for the chat bots. Uses an OpenAI-compatible
+  // /audio/transcriptions endpoint (Groq or OpenAI). The provider's API key
+  // comes from providerKeys; model '' = a sensible per-provider default.
+  transcription: {
+    enabled: true,
+    provider: 'groq',
+    model: '',
+  },
   // Local admin web UI. See `mantis admin`.
   admin: {
     port: 8788,
@@ -246,7 +261,7 @@ export function loadConfig() {
       config = { ...DEFAULTS, ...saved };
       // Deep-merge nested config objects so new default keys survive an old
       // config.json that predates them (shallow spread would drop them).
-      for (const k of ['swarm', 'proxy', 'bots', 'admin', 'auth', 'google']) {
+      for (const k of ['swarm', 'proxy', 'bots', 'transcription', 'admin', 'auth', 'google']) {
         config[k] = { ...DEFAULTS[k], ...(saved[k] || {}) };
       }
       config.proxy.routes = { ...DEFAULTS.proxy.routes, ...(saved.proxy?.routes || {}) };

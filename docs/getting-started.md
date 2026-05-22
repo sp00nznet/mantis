@@ -129,7 +129,7 @@ mantis
 | **Mistral** | [console.mistral.ai](https://console.mistral.ai) | 1B tokens/month |
 | **xAI (Grok)** | [console.x.ai](https://console.x.ai) | $25 free credits |
 
-See [Providers](providers.md) for all 22 providers.
+See [Providers](providers.md) for all 23 providers.
 
 ---
 

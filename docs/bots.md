@@ -75,8 +75,38 @@ The Discord bot needs **Node.js 22+** (it uses the built-in `WebSocket`).
 
 ### Talking to it
 
-- In a server channel: **@-mention the bot**, e.g. `@mantis fix the failing test`
+- In a server channel: **@-mention the bot**, e.g. `@mantis fix the failing test`,
+  or **reply** to one of its messages
 - In a DM: just send the message directly
+
+---
+
+## Voice notes
+
+Send a **voice note** instead of typing and the bot transcribes it, echoes back
+what it heard (`📝 …`), and works the request like any other message. Works on
+both Telegram and Discord (on Discord, voice messages work in DMs or as a reply
+to the bot — a voice message can't @-mention anyone).
+
+Transcription uses an OpenAI-compatible `/audio/transcriptions` endpoint —
+**Groq's Whisper by default** (fast and cheap). It needs an API key for the
+chosen provider; set one with `/provider key groq …`. Configure it in
+`~/.mantis/config.json`:
+
+```json
+{
+  "transcription": {
+    "enabled": true,
+    "provider": "groq",
+    "model": ""
+  }
+}
+```
+
+- `provider` — `groq` or `openai` (any provider exposing `/audio/transcriptions`).
+- `model` — leave blank for the provider default (`whisper-large-v3-turbo` for
+  Groq, `whisper-1` for OpenAI).
+- `enabled` — set `false` to turn voice transcription off.
 
 ---
 

@@ -112,12 +112,12 @@ The installer creates `config.json` with the model you chose (CPU/GPU) and sensi
 
 ## Providers
 
-Mantis supports 22 providers out of the box. All use the OpenAI-compatible chat completions API, so switching between them is seamless.
+Mantis supports 23 providers out of the box. All use the OpenAI-compatible chat completions API, so switching between them is seamless.
 
 ### Switching providers
 
 ```
-> /provider list               # see all 22 providers
+> /provider list               # see all 23 providers
 > /provider set gemini         # switch to Google Gemini
 > /provider key gemini KEY     # set your API key
 > /provider test               # verify it works
@@ -126,7 +126,7 @@ Mantis supports 22 providers out of the box. All use the OpenAI-compatible chat 
 
 ### Available providers
 
-The full list of all 22 providers — base URLs, default models, free-tier notes,
+The full list of all 23 providers — base URLs, default models, free-tier notes,
 and where to get keys — lives in **[Providers](providers.md)**.
 
 ### API keys in config

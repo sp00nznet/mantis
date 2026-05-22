@@ -76,6 +76,7 @@ export function createBotSession() {
 
 const HELP = [
   'Mantis bot — send a coding task and I will work on it in the project directory.',
+  'You can also send a voice note — I will transcribe it and work on it.',
   '',
   'Commands:',
   '/clear — reset the conversation',

@@ -16,7 +16,7 @@
 Mantis is an agentic coding CLI — a senior dev pair-programming with you in your
 terminal. It reads files, writes code, runs commands, searches your codebase, and
 plans complex tasks. Powered by any OpenAI-compatible LLM: run locally through
-[Ollama](https://ollama.com), LM Studio, or llama.cpp, or connect to 19 cloud
+[Ollama](https://ollama.com), LM Studio, or llama.cpp, or connect to 20 cloud
 providers including OpenAI, Claude, Gemini, Groq, Cerebras, and NVIDIA NIM.
 
 It can also run **as an Anthropic-compatible proxy** — point the real Claude Code
@@ -62,7 +62,7 @@ mantis bot discord       # run the Discord bot
 
 ## Features
 
-- **22 providers** — Ollama, LM Studio, and llama.cpp locally, or 19 cloud
+- **23 providers** — Ollama, LM Studio, and llama.cpp locally, or 20 cloud
   providers (OpenAI, Claude, Gemini, Groq, Cerebras, NVIDIA NIM, Kimi, Z.ai, and
   more). Switch with `/provider set`. See [docs/providers.md](docs/providers.md).
 - **10 built-in tools** — reads files, writes code, runs commands, searches the
@@ -73,7 +73,8 @@ mantis bot discord       # run the Discord bot
   parallel: one leads, the rest explore as read-only workers. See [docs/swarm.md](docs/swarm.md).
 - **Anthropic-compatible proxy** — `mantis serve` lets the real Claude Code,
   VS Code, and JetBrains run on your provider pool. See [docs/proxy.md](docs/proxy.md).
-- **Chat bots** — drive Mantis from Telegram or Discord. See [docs/bots.md](docs/bots.md).
+- **Chat bots** — drive Mantis from Telegram or Discord, by text or **voice note**
+  (transcribed automatically). See [docs/bots.md](docs/bots.md).
 - **Desktop app** — a Claude-style Electron app: general chat with persistent,
   resumable history (projects & git on the way). See [docs/desktop.md](docs/desktop.md).
 - **Admin web UI** — `mantis admin` to manage keys, providers, and routing in a
@@ -135,7 +136,7 @@ Configure routing in the admin UI or `~/.mantis/config.json`. Full details in
 
 ## Providers
 
-22 providers work out of the box — all OpenAI-compatible, switchable with
+23 providers work out of the box — all OpenAI-compatible, switchable with
 `/provider set <name>`.
 
 - **Local** — Ollama, LM Studio, llama.cpp (no API key)
@@ -162,7 +163,7 @@ The full table — base URLs, default models, free-tier notes — is in
 | Guide | What it covers |
 |-------|----------------|
 | [Getting Started](docs/getting-started.md) | Install, first session, troubleshooting |
-| [Providers](docs/providers.md) | All 22 providers, base URLs, default models |
+| [Providers](docs/providers.md) | All 23 providers, base URLs, default models |
 | [Swarm Mode](docs/swarm.md) | Multi-provider parallel execution |
 | [Proxy](docs/proxy.md) | Anthropic-compatible proxy + admin UI |
 | [Sign-in & Multi-user](docs/auth.md) | Local accounts, roles, per-account workspaces |
