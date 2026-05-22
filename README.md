@@ -66,9 +66,10 @@ mantis bot discord       # run the Discord bot
 - **23 providers** — Ollama, LM Studio, and llama.cpp locally, or 20 cloud
   providers (OpenAI, Claude, Gemini, Groq, Cerebras, NVIDIA NIM, Kimi, Z.ai, and
   more). Switch with `/provider set`. See [docs/providers.md](docs/providers.md).
-- **13 built-in tools** — reads files, writes code, runs commands, searches the
-  codebase, does surgical edits, **fetches/searches the web**. Reads before it
-  writes; chains tools together. Plus a **sub-agent** tool for delegating subtasks.
+- **15 built-in tools** — reads files, writes code, runs commands, searches the
+  codebase, does surgical edits, **fetches/searches the web**, **generates images
+  and speech**. Reads before it writes; chains tools together. Plus a **sub-agent**
+  tool for delegating subtasks.
 - **MCP client** — connect [MCP servers](docs/mcp.md) (filesystem, GitHub,
   Postgres, …) and their tools join the agent loop automatically.
 - **Autonomous mode** — `/auto "build a REST API"` and Mantis plans, writes,
@@ -89,13 +90,16 @@ mantis bot discord       # run the Discord bot
   resumable history (projects & git on the way). See [docs/desktop.md](docs/desktop.md).
 - **Admin web UI** — `mantis admin` to manage keys, providers, and routing in a
   browser — plus a Sessions tab that runs live agents in xterm.js terminals.
+- **Session sharing** — `/share` gives someone a link to **watch** your live
+  session, or **join** it and drive the agent too. See [docs/sharing.md](docs/sharing.md).
 - **Sign-in & multi-user** — optionally require a login (built-in accounts, or
   Google) for the admin panel and desktop app; each account gets an isolated
   workspace, with admin/user roles. Mobile layout too. See [docs/auth.md](docs/auth.md).
 - **Plan mode** — `/plan` to explore and design without touching anything.
 - **Context management** — long conversations auto-compact instead of crashing.
 - **Persistent memory** — "save state to memory" persists notes across sessions.
-- **Skills** — 8 built-in slash commands plus your own via `/skill create`.
+- **Skills** — 11 built-in slash commands (incl. `/research`, `/design`,
+  `/clone`) plus your own via `/skill create`.
 - **GPU-tiered install** — the installer pulls the right model size for your GPU.
 
 ---
@@ -123,6 +127,7 @@ mantis bot discord       # run the Discord bot
 | `/proxy [stop]` | Start/stop the Anthropic-compatible proxy ([docs](docs/proxy.md)) |
 | `/admin` | Start the admin web UI (providers, proxy, live sessions) |
 | `/remote [stop]` | Share this REPL session to the admin panel ([docs](docs/proxy.md#sharing-a-repl-session--remote)) |
+| `/share [join]` | Get a link to watch or join this session ([docs](docs/sharing.md)) |
 | `/bot <telegram\|discord>` | Start a chat bot ([docs](docs/bots.md)) |
 | `/memory` | Show saved memory |
 | `/skills` · `/<skillname>` | List / run skills (e.g. `/commit`, `/test`) |
@@ -180,6 +185,7 @@ The full table — base URLs, default models, free-tier notes — is in
 | [Swarm Mode](docs/swarm.md) | Multi-provider parallel execution |
 | [Proxy](docs/proxy.md) | Anthropic-compatible proxy + admin UI |
 | [MCP Servers](docs/mcp.md) | Connecting MCP servers for extra tools |
+| [Session Sharing](docs/sharing.md) | Watch/join links for a live session |
 | [Sign-in & Multi-user](docs/auth.md) | Local accounts, roles, per-account workspaces |
 | [Chat Bots](docs/bots.md) | Telegram & Discord wrappers |
 | [Desktop App](docs/desktop.md) | The Claude-style Electron app |

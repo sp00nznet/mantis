@@ -1,6 +1,7 @@
 import readline from 'readline';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import chalk from 'chalk';
 import ora from 'ora';
 import { createAgent } from './agent.js';
@@ -203,6 +204,42 @@ export async function startCLI() {
   };
 
   prompt();
+}
+
+// Pick a non-internal IPv4 address so share links work from other devices.
+function lanIp() {
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const ni of nets[name] || []) {
+      if (ni.family === 'IPv4' && !ni.internal) return ni.address;
+    }
+  }
+  return '127.0.0.1';
+}
+
+// Register this REPL session in the session hub (idempotent) so it can be
+// watched / driven from the admin panel and share links.
+async function ensureReplShared(agent, rl) {
+  if (_remoteSession) return _remoteSession;
+  const { attachSession } = await import('./sessions.js');
+  _remoteSession = attachSession({
+    name: 'cli-' + (getWorkingDirectory().split(/[/\\]/).filter(Boolean).pop() || 'session'),
+    cwd: getWorkingDirectory(),
+    agent,
+    origin: 'cli',
+    driver: {
+      input: (text) => {
+        if (_isBusy) {
+          _remoteSession?.write('\n[REPL is busy — try again when it is idle]\n');
+          return;
+        }
+        console.log(colors.dim('\n  [remote] ') + text);
+        handleUserInput(text, rl, agent);
+      },
+      stop: () => agent.cancel(),
+    },
+  });
+  return _remoteSession;
 }
 
 async function handleUserInput(input, rl, agent, opts = {}) {
@@ -1545,6 +1582,61 @@ async function handleCommand(cmd, rl, agent, ask) {
 
     // ─── Remote session sharing ──────────────────────────────────
 
+    case '/share': {
+      const sub = args.trim().toLowerCase();
+      const shares = await import('./shares.js');
+
+      if (sub === 'stop') {
+        if (_remoteSession) {
+          const n = shares.revokeSessionShares(_remoteSession.id);
+          console.log(colors.success(`  Revoked ${n} share link${n === 1 ? '' : 's'}.\n`));
+        } else {
+          console.log(colors.dim('  No share links to revoke.\n'));
+        }
+        break;
+      }
+      if (sub === 'list') {
+        const list = _remoteSession ? shares.listShares(_remoteSession.id) : [];
+        if (!list.length) { console.log(colors.dim('  No active share links.\n')); break; }
+        const port = _adminServer ? _adminServer.address().port : (getConfig().admin?.port || 8788);
+        console.log('\n  ' + colors.header('Active share links'));
+        for (const s of list) {
+          console.log(`  ${colors.dim('[' + s.mode + ']')} http://${lanIp()}:${port}/s/${s.token}`);
+        }
+        console.log('');
+        break;
+      }
+
+      const mode = sub === 'join' ? 'join' : 'watch';
+      try {
+        if (!_adminServer) {
+          const { startAdmin } = await import('./admin.js');
+          _adminServer = await startAdmin({ host: '0.0.0.0' });
+        }
+        await ensureReplShared(agent, rl);
+        const token = shares.createShare(_remoteSession.id, mode);
+        const addr = _adminServer.address();
+        const lanReachable = addr.address === '0.0.0.0' || addr.address === '::';
+        console.log(colors.success(`\n  Share link — ${mode === 'join' ? 'watch + control' : 'watch only'}:`));
+        if (lanReachable) {
+          console.log('  ' + colors.toolName(`http://${lanIp()}:${addr.port}/s/${token}`));
+          console.log(colors.dim(`  Local:  http://127.0.0.1:${addr.port}/s/${token}`));
+        } else {
+          console.log('  ' + colors.toolName(`http://127.0.0.1:${addr.port}/s/${token}`));
+          console.log(colors.warning('  The admin server is bound to localhost — reachable only on this machine.'));
+          console.log(colors.dim('  Restart Mantis and run /share before /admin to expose it on your network.'));
+        }
+        if (mode === 'join') {
+          console.log(colors.warning('  Join mode lets the guest drive an agent with full tool access here.'));
+        }
+        console.log(colors.dim('  Internet access needs a tunnel (cloudflared / ngrok) in front.'));
+        console.log(colors.dim('  /share stop revokes links · /share list shows them.\n'));
+      } catch (err) {
+        console.log(colors.error(`  Failed to create a share link: ${err.message}\n`));
+      }
+      break;
+    }
+
     case '/remote': {
       const sub = args.trim().toLowerCase();
       if (sub === 'stop') {
@@ -1568,24 +1660,7 @@ async function handleCommand(cmd, rl, agent, ask) {
           const { startAdmin } = await import('./admin.js');
           _adminServer = await startAdmin();
         }
-        const { attachSession } = await import('./sessions.js');
-        _remoteSession = attachSession({
-          name: 'cli-' + (getWorkingDirectory().split(/[/\\]/).filter(Boolean).pop() || 'session'),
-          cwd: getWorkingDirectory(),
-          agent,
-          origin: 'cli',
-          driver: {
-            input: (text) => {
-              if (_isBusy) {
-                _remoteSession?.write('\n[REPL is busy — try again when it is idle]\n');
-                return;
-              }
-              console.log(colors.dim('\n  [remote] ') + text);
-              handleUserInput(text, rl, agent);
-            },
-            stop: () => agent.cancel(),
-          },
-        });
+        await ensureReplShared(agent, rl);
         _remoteSession.write(colors.green('  This REPL session is now live in the admin panel.\n\n'));
         const ac = getConfig().admin;
         console.log(colors.success('\n  Session shared to the admin panel.'));
@@ -1821,6 +1896,7 @@ function printHelp() {
   ${colors.toolName('/proxy stop')}        Stop the proxy server
   ${colors.toolName('/admin')}             Start the admin web UI (providers, proxy, sessions)
   ${colors.toolName('/remote')}            Share this REPL session to the admin panel
+  ${colors.toolName('/share [join]')}      Get a link to watch (or join) this session
   ${colors.toolName('/remote stop')}       Stop sharing this session
   ${colors.toolName('/bot telegram')}      Start the Telegram bot
   ${colors.toolName('/bot discord')}       Start the Discord bot

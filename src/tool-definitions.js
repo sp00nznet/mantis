@@ -229,13 +229,17 @@ export const toolDefinitions = [
     type: "function",
     function: {
       name: "web_fetch",
-      description: "Download a web page or URL and return its readable text content. Use to read documentation, changelogs, issue trackers, or any page the user references.",
+      description: "Download a web page or URL and return its content. By default HTML is stripped to readable text; set raw=true to get the actual page source (HTML/CSS/JS) — needed when cloning or analysing a page's markup and styles.",
       parameters: {
         type: "object",
         properties: {
           url: {
             type: "string",
             description: "The http(s) URL to fetch"
+          },
+          raw: {
+            type: "boolean",
+            description: "If true, return the raw source instead of stripped text. Use for cloning or inspecting markup/styles."
           }
         },
         required: ["url"]
@@ -273,6 +277,56 @@ export const toolDefinitions = [
           }
         },
         required: ["task"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "generate_image",
+      description: "Generate an image from a text prompt and save it to a file. Use for icons, illustrations, hero images, placeholder graphics, or other visual assets a project needs.",
+      parameters: {
+        type: "object",
+        properties: {
+          prompt: {
+            type: "string",
+            description: "A detailed description of the image to generate"
+          },
+          path: {
+            type: "string",
+            description: "Where to save the image, relative to the working directory. Defaults to generated-image.png"
+          },
+          size: {
+            type: "string",
+            description: "Optional image size, e.g. '1024x1024', '1536x1024', '1024x1536'"
+          }
+        },
+        required: ["prompt"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "generate_speech",
+      description: "Generate spoken audio from text (text-to-speech) and save it to an audio file. Use to produce voice-overs or audio assets.",
+      parameters: {
+        type: "object",
+        properties: {
+          text: {
+            type: "string",
+            description: "The text to speak"
+          },
+          path: {
+            type: "string",
+            description: "Where to save the audio file, relative to the working directory. Defaults to generated-speech.mp3"
+          },
+          voice: {
+            type: "string",
+            description: "Optional voice name (provider-dependent, e.g. 'alloy', 'nova', 'echo')"
+          }
+        },
+        required: ["text"]
       }
     }
   }

@@ -29,7 +29,7 @@ Pass arguments after the name:
 
 ## Built-in Skills
 
-Mantis ships with 8 skills out of the box:
+Mantis ships with 11 skills out of the box:
 
 | Skill | Args | What it does |
 |-------|------|-------------|
@@ -41,6 +41,9 @@ Mantis ships with 8 skills out of the box:
 | `/refactor <target>` | File or function name | Reads the code, identifies improvements, refactors without changing behavior |
 | `/deps` | None | Reads dependency files, explains each package, flags issues |
 | `/init` | None | Explores the project structure, reads key files, gives you the lay of the land |
+| `/research <topic>` | Topic or question | Searches the web across multiple sources and writes a cited summary |
+| `/design <what>` | What to build | Designs and builds a website/UI — matches an attached mockup if you add one |
+| `/clone <url or path>` | A URL or local path | Clones a website or app — extracts its design, content, and assets and rebuilds it |
 
 ### Example: `/commit`
 

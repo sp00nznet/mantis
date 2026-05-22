@@ -29,9 +29,11 @@ import {
 import * as auth from './auth.js';
 import * as users from './users.js';
 import * as accounts from './accounts.js';
+import { getShare } from './shares.js';
 
 const ADMIN_DIR = path.dirname(fileURLToPath(import.meta.url));
 const HTML_PATH = path.join(ADMIN_DIR, 'admin.html');
+const SHARED_HTML_PATH = path.join(ADMIN_DIR, 'shared.html');
 const ASSETS_DIR = path.join(ADMIN_DIR, 'assets');
 
 // ─── Access helpers ─────────────────────────────────────────────────
@@ -629,16 +631,55 @@ function serveStatic(res, url) {
   res.end(data);
 }
 
-function servePage(res) {
+function servePage(res, file = HTML_PATH) {
   let html;
-  try { html = fs.readFileSync(HTML_PATH, 'utf-8'); }
+  try { html = fs.readFileSync(file, 'utf-8'); }
   catch {
     res.writeHead(500, { 'Content-Type': 'text/plain' });
-    res.end('admin.html not found');
+    res.end('page not found');
     return;
   }
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(html);
+}
+
+// ─── Session share links (token-gated, no login) ────────────────────
+
+async function handleShared(req, res, url) {
+  // Guest page — /s/<token>
+  if (url.startsWith('/s/')) {
+    const token = url.slice(3).split('/')[0];
+    if (!getShare(token)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('This share link is invalid or has expired.\n');
+      return;
+    }
+    return servePage(res, SHARED_HTML_PATH);
+  }
+
+  // Guest API — /api/shared/<token>[/action]
+  const parts = url.split('/').filter(Boolean);
+  const token = parts[2];
+  const action = parts[3];
+  const share = getShare(token);
+  if (!share) return sendJson(res, 404, { error: 'Invalid or expired share link' });
+  const session = getSession(share.sessionId);
+  if (!session) return sendJson(res, 404, { error: 'The shared session has ended' });
+
+  if (!action) {
+    return sendJson(res, 200, { name: session.name, mode: share.mode, status: session.status });
+  }
+  if (action === 'stream' && req.method === 'GET') {
+    return streamSession(req, res, session);
+  }
+  if (action === 'input' && req.method === 'POST') {
+    if (share.mode !== 'join') return sendJson(res, 403, { error: 'This is a watch-only link' });
+    const body = await readJson(req);
+    if (!body.text) return sendJson(res, 400, { error: 'text is required' });
+    sendInput(share.sessionId, String(body.text));
+    return sendJson(res, 200, { ok: true });
+  }
+  return sendJson(res, 404, { error: 'No such share route' });
 }
 
 export async function handleAdminRequest(req, res) {
@@ -649,6 +690,12 @@ export async function handleAdminRequest(req, res) {
     // Auth + static assets are always reachable.
     if (authOn && url.startsWith('/auth/')) return await handleAuth(req, res, url);
     if (url === '/favicon.ico' || url.startsWith('/assets/')) return serveStatic(res, url);
+
+    // Session share links are token-gated — reachable without a login and
+    // exempt from the loopback restriction (the token is the credential).
+    if (url.startsWith('/s/') || url.startsWith('/api/shared/')) {
+      return await handleShared(req, res, url);
+    }
 
     if (authOn) {
       // Network access allowed; require a valid session.

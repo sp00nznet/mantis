@@ -5,6 +5,7 @@ import { truncate } from './utils.js';
 import { getConfig } from './config.js';
 import { recordChange } from './checkpoints.js';
 import { webFetch, webSearch } from './web.js';
+import { generateImage, generateSpeech } from './generate.js';
 import {
   loadGlobalMemory, loadProjectMemory, loadAllMemory,
   saveGlobalMemory, saveProjectMemory,
@@ -58,7 +59,7 @@ function isReadOnlyCommand(cmd) {
 export async function executeTool(name, args) {
   // Plan mode guard: block write operations
   if (planMode) {
-    const writeTools = ['write_file', 'edit_file'];
+    const writeTools = ['write_file', 'edit_file', 'generate_image', 'generate_speech'];
     if (writeTools.includes(name)) {
       return `BLOCKED: Plan mode is active. File modifications are not allowed. Use /plan to exit plan mode first.`;
     }
@@ -82,9 +83,13 @@ export async function executeTool(name, args) {
       case 'save_memory': return saveMemoryTool(args);
       case 'read_memory': return readMemoryTool(args);
       case 'delete_memory': return deleteMemoryTool(args);
-      case 'web_fetch': return await webFetch(args.url);
+      case 'web_fetch': return await webFetch(args.url, args.raw);
       case 'web_search': return await webSearch(args.query);
       case 'run_subagent': return await runSubagent(args);
+      case 'generate_image':
+        return await generateImage(args.prompt, args.path || 'generated-image.png', args.size, workingDirectory);
+      case 'generate_speech':
+        return await generateSpeech(args.text, args.path || 'generated-speech.mp3', args.voice, workingDirectory);
       default:
         // MCP tools are namespaced mcp__<server>__<tool>.
         if (name.startsWith('mcp__')) {

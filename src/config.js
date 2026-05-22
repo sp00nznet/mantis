@@ -238,6 +238,9 @@ const DEFAULTS = {
   // MCP (Model Context Protocol) servers — their tools are added to the agent.
   // stdio: { command, args, env }   ·   http: { url, headers }
   mcpServers: {},
+  // Media generation tools. Provider keys come from providerKeys.
+  imageGen: { provider: 'openai', model: 'gpt-image-1' },
+  speech: { provider: 'openai', model: 'gpt-4o-mini-tts', voice: 'alloy' },
   // Local admin web UI. See `mantis admin`.
   admin: {
     port: 8788,
@@ -270,7 +273,7 @@ export function loadConfig() {
       config = { ...DEFAULTS, ...saved };
       // Deep-merge nested config objects so new default keys survive an old
       // config.json that predates them (shallow spread would drop them).
-      for (const k of ['swarm', 'proxy', 'bots', 'transcription', 'hooks', 'admin', 'auth', 'google']) {
+      for (const k of ['swarm', 'proxy', 'bots', 'transcription', 'hooks', 'imageGen', 'speech', 'admin', 'auth', 'google']) {
         config[k] = { ...DEFAULTS[k], ...(saved[k] || {}) };
       }
       config.proxy.routes = { ...DEFAULTS.proxy.routes, ...(saved.proxy?.routes || {}) };

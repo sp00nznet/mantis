@@ -147,7 +147,7 @@ Saves and loads conversation histories to JSON files on disk.
 
 ### `src/skills.js` — The Playbook
 The skill system. Three layers of skills with priority resolution:
-- **Built-in** — 8 skills hardcoded in the module (commit, review, test, etc.)
+- **Built-in** — 11 skills hardcoded in the module (commit, review, test, etc.)
 - **User** — JSON files in `~/.mantis/skills/`, available globally
 - **Project** — JSON files in `.mantis/skills/` at the project root, highest priority
 

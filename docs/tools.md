@@ -1,6 +1,6 @@
 # Tools Reference
 
-Mantis gives the AI model 13 built-in tools to interact with your system. The model decides which tools to use and when — you just describe what you want done. Connected [MCP servers](mcp.md) add more tools on top.
+Mantis gives the AI model 15 built-in tools to interact with your system. The model decides which tools to use and when — you just describe what you want done. Connected [MCP servers](mcp.md) add more tools on top.
 
 ---
 
@@ -246,16 +246,17 @@ Clears persistent memory.
 
 ## web_fetch
 
-Downloads a URL and returns its readable text content (HTML is stripped to text).
+Downloads a URL and returns its content. By default HTML is stripped to readable text.
 
 **Parameters:**
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | `url` | string | yes | The http(s) URL to fetch |
+| `raw` | boolean | no | Return the raw page source (HTML/CSS/JS) instead of stripped text — used for cloning or inspecting markup |
 
 **Behavior:**
 - Used to read documentation, changelogs, issue trackers, or any referenced page
-- Output is capped at ~12,000 characters
+- Stripped output is capped at ~12,000 characters; raw output at ~50,000
 
 ## web_search
 
@@ -285,6 +286,37 @@ full tool set.
 - Keeps the main conversation uncluttered for self-contained work
 - The sub-agent cannot see the main conversation — the task must be fully described
 - A sub-agent cannot spawn another sub-agent
+
+## generate_image
+
+Generates an image from a text prompt and saves it to a file.
+
+**Parameters:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `prompt` | string | yes | A detailed description of the image |
+| `path` | string | no | Where to save it (default `generated-image.png`) |
+| `size` | string | no | e.g. `1024x1024`, `1536x1024` |
+
+**Behavior:**
+- Calls an OpenAI-compatible `/images/generations` endpoint — provider/model in
+  `config.imageGen`, API key from `providerKeys`
+- Useful for icons, illustrations, and placeholder assets
+
+## generate_speech
+
+Generates spoken audio from text (text-to-speech) and saves it to a file.
+
+**Parameters:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `text` | string | yes | The text to speak |
+| `path` | string | no | Where to save it (default `generated-speech.mp3`) |
+| `voice` | string | no | Voice name (e.g. `alloy`, `nova`) |
+
+**Behavior:**
+- Calls an OpenAI-compatible `/audio/speech` endpoint — provider/model/voice in
+  `config.speech`, API key from `providerKeys`
 
 ---
 

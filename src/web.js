@@ -30,8 +30,13 @@ function htmlToText(html) {
     .trim();
 }
 
-/** Download a URL and return its text content. */
-export async function webFetch(url) {
+/**
+ * Download a URL and return its content.
+ * @param {string} url
+ * @param {boolean} [raw] - return the raw source (HTML/CSS/JS) instead of
+ *   stripped text — needed for cloning a page's markup and styles.
+ */
+export async function webFetch(url, raw) {
   if (!/^https?:\/\//i.test(url || '')) {
     return 'Error: web_fetch needs an http(s) URL.';
   }
@@ -52,12 +57,13 @@ export async function webFetch(url) {
   try { body = await r.text(); }
   catch (err) { return `Error reading ${url}: ${err.message}`; }
 
-  const text = /html/i.test(ctype) ? htmlToText(body) : body.trim();
-  const max = 12000;
+  const text = raw ? body : (/html/i.test(ctype) ? htmlToText(body) : body.trim());
+  const max = raw ? 50000 : 12000;
   const clipped = text.length > max
     ? text.slice(0, max) + `\n\n… (truncated — ${text.length} chars total)`
     : text;
-  return `Content of ${url}:\n\n${clipped}`;
+  const label = raw ? `Raw source of ${url}` : `Content of ${url}`;
+  return `${label}:\n\n${clipped}`;
 }
 
 /** Search the web for a query. */

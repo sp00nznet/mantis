@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mantis — shared session</title>
+<link rel="icon" href="/assets/icon.png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+<style>
+  :root {
+    --bg:#0d1117; --bg-dark:#0a0e14; --surface:#161b22; --border:#21262d;
+    --border-hi:#30363d; --text:#c9d1d9; --dim:#8b949e; --accent:#3fb950;
+    --accent2:#58a6ff; --danger:#f85149;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--bg); color: var(--text); height: 100vh;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--bg-dark);
+  }
+  header img { width: 24px; height: 24px; }
+  header .name { font-weight: 600; color: var(--text); }
+  header .spacer { flex: 1; }
+  .badge {
+    font-size: 11px; padding: 2px 9px; border-radius: 10px;
+    border: 1px solid var(--border-hi); color: var(--dim);
+  }
+  .badge.join { border-color: var(--accent); color: var(--accent); }
+  .badge.watch { border-color: var(--accent2); color: var(--accent2); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+  .dot.running { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  #term { flex: 1; min-height: 0; padding: 8px 10px; background: var(--bg-dark); }
+  .composer {
+    display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border);
+    background: var(--bg-dark);
+  }
+  .composer textarea {
+    flex: 1; resize: none; height: 38px; max-height: 140px;
+    background: var(--surface); border: 1px solid var(--border-hi); border-radius: 8px;
+    color: var(--text); font: inherit; padding: 9px 11px;
+  }
+  .composer textarea:focus { outline: none; border-color: var(--accent2); }
+  .composer button {
+    border: 1px solid var(--accent); background: var(--accent); color: #fff;
+    border-radius: 8px; padding: 0 18px; font: inherit; cursor: pointer;
+  }
+  .composer button:hover { filter: brightness(1.12); }
+  .msg { margin: auto; text-align: center; color: var(--dim); padding: 60px 20px; }
+  .msg h1 { color: var(--text); font-size: 18px; margin-bottom: 8px; }
+  .watch-note {
+    padding: 7px 12px; text-align: center; font-size: 11px; color: var(--dim);
+    border-top: 1px solid var(--border); background: var(--bg-dark);
+  }
+</style>
+</head>
+<body>
+<div id="app" style="display:none; flex:1; flex-direction:column; min-height:0">
+  <header>
+    <img src="/assets/icon.png" alt="">
+    <span class="dot" id="dot"></span>
+    <span class="name" id="sessName">session</span>
+    <span class="spacer"></span>
+    <span class="badge" id="modeBadge">…</span>
+  </header>
+  <div id="term"></div>
+  <div class="composer" id="composer" style="display:none">
+    <textarea id="input" placeholder="Message this session — Enter to send, Shift+Enter for newline"></textarea>
+    <button id="send">Send</button>
+  </div>
+  <div class="watch-note" id="watchNote" style="display:none">👁 Watch-only — you can see this session but not control it.</div>
+</div>
+<div id="error" class="msg" style="display:none"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<script>
+"use strict";
+var token = location.pathname.replace(/^\/s\//, '').split('/')[0];
+
+function fail(title, detail) {
+  var e = document.getElementById('error');
+  e.innerHTML = '<h1>' + title + '</h1><p>' + (detail || '') + '</p>';
+  e.style.display = 'flex';
+}
+
+fetch('/api/shared/' + token).then(function(r){
+  if (!r.ok) throw new Error('bad');
+  return r.json();
+}).then(function(meta){
+  document.getElementById('app').style.display = 'flex';
+  document.getElementById('sessName').textContent = meta.name || 'session';
+  var badge = document.getElementById('modeBadge');
+  badge.textContent = meta.mode === 'join' ? '✎ can control' : '👁 watch only';
+  badge.className = 'badge ' + meta.mode;
+
+  var term = new Terminal({
+    convertEol: false, fontSize: 12, cursorBlink: false, disableStdin: true,
+    scrollback: 6000, fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
+    theme: { background: '#0a0e14', foreground: '#c9d1d9', cursor: '#3fb950' },
+  });
+  var fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById('term'));
+  try { fit.fit(); } catch (e) {}
+  window.addEventListener('resize', function(){ try { fit.fit(); } catch (e) {} });
+
+  var dot = document.getElementById('dot');
+  var es = new EventSource('/api/shared/' + token + '/stream');
+  es.onmessage = function(ev){
+    var f; try { f = JSON.parse(ev.data); } catch (e) { return; }
+    if (f.type === 'write') term.write(f.text);
+    else if (f.type === 'status') dot.className = 'dot ' + f.status;
+  };
+  es.onerror = function(){ /* EventSource auto-reconnects */ };
+
+  if (meta.mode === 'join') {
+    document.getElementById('composer').style.display = 'flex';
+    var input = document.getElementById('input');
+    function send() {
+      var v = input.value.trim();
+      if (!v) return;
+      fetch('/api/shared/' + token + '/input', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: v }),
+      });
+      input.value = '';
+    }
+    document.getElementById('send').onclick = send;
+    input.addEventListener('keydown', function(e){
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+    input.focus();
+  } else {
+    document.getElementById('watchNote').style.display = 'block';
+  }
+}).catch(function(){
+  fail('Link not available', 'This share link is invalid, has expired, or the session has ended.');
+});
+</script>
+</body>
+</html>

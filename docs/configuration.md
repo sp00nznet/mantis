@@ -80,6 +80,8 @@ Here's the full config with defaults:
 | `transcription` | object | — | Voice-note transcription — see [Chat Bots](bots.md#voice-notes). |
 | `hooks` | object | `{ afterEdit: [] }` | Shell commands run after the agent writes/edits a file. `{file}` is replaced with the path. e.g. `["npx prettier --write {file}"]`. |
 | `mcpServers` | object | `{}` | MCP servers whose tools are added to the agent — see [MCP Servers](mcp.md). |
+| `imageGen` | object | `{ provider, model }` | Provider/model for the `generate_image` tool. Default OpenAI `gpt-image-1`. |
+| `speech` | object | `{ provider, model, voice }` | Provider/model/voice for the `generate_speech` tool. Default OpenAI `gpt-4o-mini-tts`. |
 | `admin` | object | — | Admin web UI port and host — see [Proxy & Admin UI](proxy.md#admin-ui). |
 | `auth` | object | — | Sign-in / multi-user settings — see [Sign-in & Multi-user](auth.md). |
 

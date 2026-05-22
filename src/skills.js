@@ -144,6 +144,85 @@ Do NOT change behavior — this is a pure refactor.`,
    - Any notable patterns or conventions
 This is my first time looking at this codebase, so give me the lay of the land.`,
   },
+  {
+    name: 'research',
+    description: 'Research a topic on the web and write a cited summary',
+    args: '<topic or question>',
+    prompt: `Research this topic and produce a well-sourced summary: {{args}}
+
+1. Use web_search to find relevant, current sources — run several searches from different angles.
+2. Use web_fetch to read the most promising results in full.
+3. Cross-check facts across at least three independent sources; note where they disagree.
+4. Write a clear, structured summary:
+   - A direct answer / overview up front
+   - Key findings with the specifics that matter
+   - Caveats, open questions, or conflicting information
+5. End with a Sources list — the URLs you actually used.
+Be accurate over comprehensive. If something can't be verified, say so plainly.`,
+  },
+  {
+    name: 'design',
+    description: 'Design and build a website or UI',
+    args: '<what to build>',
+    prompt: `Design and build this UI: {{args}}
+
+1. If I attached an image (a mockup or screenshot), study it closely and match the layout,
+   spacing, colours, and typography. If not, propose a clean, modern design yourself.
+2. Choose the stack — default to a single self-contained HTML file with embedded CSS (and
+   minimal JS). If the project already uses a framework, follow it instead.
+3. Build it:
+   - Semantic, accessible HTML
+   - A cohesive colour palette and a consistent spacing scale
+   - A responsive, mobile-friendly layout
+   - Tasteful detail — hover states, transitions — without overdoing it
+4. Write the file(s), then say how to open/run the result and flag anything to review.
+Aim for something that looks intentional and polished, not a generic template.`,
+  },
+  {
+    name: 'clone',
+    description: 'Clone a website or app — pass a URL or a local path and get a working rebuild',
+    args: '<url or local path>',
+    prompt: `Clone this and rebuild it as a working project: {{args}}
+
+## First, identify the target
+- If it starts with http(s):// it is a live WEBSITE to clone.
+- Otherwise treat it as a local PATH — an existing app/codebase to clone. Run list_files on it to confirm.
+
+## Cloning a WEBSITE
+1. Fetch the page source with web_fetch using raw=true to get the actual HTML. Also fetch every
+   linked stylesheet (<link rel="stylesheet">), and note any inline <style> blocks.
+2. If a browser-automation MCP server is connected (check for mcp__ tools that navigate, screenshot,
+   or evaluate JS), use it — it gives far higher fidelity: real screenshots, computed styles via
+   getComputedStyle(), and the page's scroll/hover/click behaviour. If none is connected, work from
+   the raw HTML/CSS and mention that a browser MCP server (e.g. Playwright MCP) would improve accuracy.
+3. Extract the real material — never approximate:
+   - Design tokens: colours, fonts (including Google Font links), spacing, radii, shadows.
+   - Structure: every distinct section of the page, top to bottom.
+   - Content: the actual text and labels, verbatim.
+   - Assets: image / SVG / video URLs — download them into an assets/ folder (web_fetch or curl).
+   - Behaviour: sticky/var headers, hover states, scroll animations, tabs, carousels.
+4. Rebuild it:
+   - Default to a clean, self-contained site (semantic HTML + one CSS file + minimal JS). Match a
+     framework instead only if I ask for one or the project already uses it.
+   - Recreate it section by section. For a large page, use run_subagent to build independent
+     sections — give each sub-agent the exact tokens, content, and asset paths for its section.
+   - Wire up the downloaded assets and the interactive behaviour.
+5. QA: serve/open the result and compare it to the original section by section; fix the gaps.
+
+## Cloning an APP (local path)
+1. Explore the codebase — list_files, read the entry point, config, and key modules. Work out the
+   stack, structure, and what the app actually does.
+2. Summarise it back to me: purpose, stack, main features, architecture.
+3. Rebuild it — a faithful reimplementation, a port to another stack, or a clean rewrite. If I
+   didn't say which, do a faithful reimplementation and note that I can ask for a port instead.
+4. Recreate features incrementally, verifying the build/tests as you go.
+
+## Always
+- A clone uses the original's real content and assets — not lorem ipsum or placeholders.
+- Only clone what you can legitimately access: for anything behind a login, clone the public pages.
+- When done, report what you built, how to run it, and anything you could not reproduce
+  (server-rendered data, auth, real-time features).`,
+  },
 ];
 
 // ─── Skill management ───────────────────────────────────────────────

@@ -577,7 +577,8 @@ async function handleRequest(req, res) {
   // Admin UI is mounted alongside the proxy — including its API, Google auth
   // routes, and static assets.
   if (url === '/admin' || url.startsWith('/admin/') || url.startsWith('/api/') ||
-      url.startsWith('/auth/') || url.startsWith('/assets/') || url === '/favicon.ico') {
+      url.startsWith('/auth/') || url.startsWith('/assets/') || url === '/favicon.ico' ||
+      url.startsWith('/s/')) {
     return handleAdminRequest(req, res);
   }
 
