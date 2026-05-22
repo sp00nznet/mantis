@@ -1139,17 +1139,52 @@ function buildTerminal(s, mini) {
 
   if (!mini) {
     var ir = el('div', { class: 'input-row' });
+    var attached = []; // { kind:'image'|'text', name, dataUrl|content }
+    var fileInput = el('input', {
+      type: 'file', multiple: 'multiple',
+      accept: 'image/*,.txt,.md,.json,.js,.ts,.jsx,.tsx,.py,.css,.html,.csv,.log,.yml,.yaml',
+    });
+    fileInput.style.display = 'none';
+    var clip = el('button', { class: 'alt', title: 'Attach an image or file' }, '📎');
+    var chip = el('span');
+    chip.style.cssText = 'color:var(--dimmer);font-size:11px;align-self:center;white-space:nowrap';
+    function refreshChip() { chip.textContent = attached.length ? attached.length + ' attached' : ''; }
+    clip.onclick = function(){ fileInput.click(); };
+    fileInput.onchange = function(){
+      Array.prototype.slice.call(fileInput.files || []).forEach(function(f){
+        if (f.size > 8 * 1024 * 1024) { toast(f.name + ' is too large (8 MB max)', true); return; }
+        var reader = new FileReader();
+        if (/^image\//.test(f.type)) {
+          reader.onload = function(){ attached.push({ kind:'image', name:f.name, dataUrl:reader.result }); refreshChip(); };
+          reader.readAsDataURL(f);
+        } else {
+          reader.onload = function(){ attached.push({ kind:'text', name:f.name, content:String(reader.result) }); refreshChip(); };
+          reader.readAsText(f);
+        }
+      });
+      fileInput.value = '';
+    };
     var ta = el('textarea', { placeholder: 'Message this session — Enter to send, Shift+Enter for newline' });
     var send = el('button', null, 'Send');
     function fire() {
       var v = ta.value.trim();
-      if (!v) return;
-      api('POST','/api/sessions/'+s.id+'/input', { text: v });
+      if (!v && !attached.length) return;
+      var images = [], blocks = [];
+      attached.forEach(function(a){
+        if (a.kind === 'image') images.push(a.dataUrl);
+        else blocks.push('Attached file ' + a.name + ':\n```\n' + a.content + '\n```');
+      });
+      var msg = blocks.length ? (v ? v + '\n\n' : '') + blocks.join('\n\n') : v;
+      if (!msg) msg = '(see the attached image)';
+      api('POST','/api/sessions/'+s.id+'/input', { text: msg, images: images });
       ta.value = '';
+      attached = [];
+      refreshChip();
     }
     send.onclick = fire;
     ta.onkeydown = function(e){ if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fire(); } };
-    ir.appendChild(ta); ir.appendChild(send);
+    ir.appendChild(clip); ir.appendChild(fileInput);
+    ir.appendChild(ta); ir.appendChild(chip); ir.appendChild(send);
     wrap.appendChild(ir);
   }
 

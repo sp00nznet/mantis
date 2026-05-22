@@ -6,7 +6,7 @@
  * Phase 2: projects — agent-mode sessions bound to a folder, with a file tree.
  */
 
-import { app, BrowserWindow, ipcMain, shell, safeStorage } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, safeStorage, dialog } from 'electron';
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
@@ -315,14 +315,55 @@ ipcMain.handle('config:setKey', (_e, { provider, key }) => {
 
 ipcMain.handle('config:models', (_e, provider) => listModels(provider, currentPrefs()));
 
+// ─── Attachments IPC ────────────────────────────────────────────────
+
+ipcMain.handle('attach:pick', async () => {
+  if (!mainWindow) return { files: [] };
+  const res = await dialog.showOpenDialog(mainWindow, {
+    title: 'Attach images or files',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: 'Images & text files', extensions: [
+        'png', 'jpg', 'jpeg', 'gif', 'webp',
+        'txt', 'md', 'json', 'js', 'ts', 'jsx', 'tsx', 'py', 'css', 'html', 'csv', 'log', 'yml', 'yaml',
+      ] },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  });
+  if (res.canceled) return { files: [] };
+
+  const imageMime = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+  const files = [];
+  for (const fp of res.filePaths) {
+    const name = path.basename(fp);
+    try {
+      if (fs.statSync(fp).size > 8 * 1024 * 1024) {
+        files.push({ name, error: 'too large (8 MB max)' });
+        continue;
+      }
+      const ext = path.extname(fp).toLowerCase().slice(1);
+      if (imageMime[ext]) {
+        const b64 = fs.readFileSync(fp).toString('base64');
+        files.push({ name, kind: 'image', dataUrl: `data:${imageMime[ext]};base64,${b64}` });
+      } else {
+        files.push({ name, kind: 'text', content: fs.readFileSync(fp, 'utf-8') });
+      }
+    } catch (err) {
+      files.push({ name, error: err.message });
+    }
+  }
+  return { files };
+});
+
 // ─── Chat IPC ───────────────────────────────────────────────────────
 
-ipcMain.handle('chat:send', async (_e, { sessionId, text }) => {
+ipcMain.handle('chat:send', async (_e, { sessionId, text, images }) => {
   if (auth.isAuthEnabled() && !currentUser) return { error: 'Please sign in first' };
   const session = store.get(sessionId);
   if (!session) return { error: 'No such session' };
 
   const prefs = currentPrefs();
+  const imgs = Array.isArray(images) && images.length ? images : null;
   const isFirstUserMsg = !session.messages.some(m => m.role === 'user');
   const ctl = { cancelled: false, agent: null };
   running.set(sessionId, ctl);
@@ -344,10 +385,18 @@ ipcMain.handle('chat:send', async (_e, { sessionId, text }) => {
         errored = true;
         cb.onError('The project for this session no longer exists.');
       } else {
-        await runAgentTurn(session, project, text, cb, ctl, prefs);
+        await runAgentTurn(session, project, text, cb, ctl, prefs, imgs);
       }
     } else {
-      session.messages.push({ role: 'user', content: text });
+      // With images, the user turn becomes multi-part content (vision format).
+      let userContent = text;
+      if (imgs) {
+        userContent = [
+          { type: 'text', text: text || '(see the attached image)' },
+          ...imgs.map(url => ({ type: 'image_url', image_url: { url } })),
+        ];
+      }
+      session.messages.push({ role: 'user', content: userContent });
       let full = '';
       const assistant = await runChatTurn(session, {
         onText: (t) => { full += t; cb.onText(t); },

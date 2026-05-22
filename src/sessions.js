@@ -107,7 +107,7 @@ class Session {
 
 // ─── Web-session runner ─────────────────────────────────────────────
 
-async function runWeb(session, text) {
+async function runWeb(session, text, images) {
   if (session.status === 'running') {
     session.write(`${A.yellow}[busy — wait for the current task to finish]${A.reset}\r\n`);
     return;
@@ -116,11 +116,13 @@ async function runWeb(session, text) {
   // directory before each run. Concurrent runs in different dirs can race.
   setWorkingDirectory(session.cwd);
   session.setStatus('running');
-  session.write(`${A.blue}${A.bold}❯ ${text}${A.reset}\r\n`);
+  const imgNote = images && images.length ? ` ${A.grey}[+${images.length} image]${A.reset}` : '';
+  session.write(`${A.blue}${A.bold}❯ ${text}${A.reset}${imgNote}\r\n`);
 
   try {
     await session.agent.chat(text, {
       maxLoops: 50,
+      images,
       onText: (t) => session.write(t),
       onToolCall: (name, args) =>
         session.write(`${A.cyan}⚙ ${name}${A.reset} ${A.grey}${fmtArgs(args)}${A.reset}\r\n`),
@@ -162,7 +164,7 @@ export function createWebSession({ name, cwd, userId, prefs } = {}) {
   const agent = createAgent({ prefs });
   const session = new Session({ name, cwd, origin: 'web', agent, userId });
   session.driver = {
-    input: (text) => runWeb(session, text),
+    input: (text, images) => runWeb(session, text, images),
     stop: () => agent.cancel(),
   };
   _sessions.set(session.id, session);
@@ -195,10 +197,10 @@ export function removeSession(id) {
   return true;
 }
 
-export function sendInput(id, text) {
+export function sendInput(id, text, images) {
   const session = _sessions.get(id);
   if (!session || !session.driver?.input) return false;
-  session.driver.input(text);
+  session.driver.input(text, images);
   return true;
 }
 

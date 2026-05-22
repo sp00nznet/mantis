@@ -151,6 +151,8 @@ xterm.js terminals:
 - **+ New** spawns a fresh agent session in a directory you choose. Type a
   message, press Enter, and it works the task with all tools enabled
   (auto-approved, like autonomous mode).
+- **Attach images & files** — the 📎 button on a session's composer attaches
+  images (for vision models) or text files (content included in the message).
 - **Grid view** shows every session's terminal at once — handy for watching
   several agents in parallel.
 - Each session has its own conversation; delete one with the ✕ on its chip.

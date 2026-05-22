@@ -52,7 +52,7 @@ export async function runChatTurn(session, { onText, onError, onThinking }, isCa
  * auto-approved (there's no terminal to confirm at). Mutates session.messages.
  * @param {object} ctl - { cancelled:boolean, agent } — agent is set so it can be cancelled
  */
-export async function runAgentTurn(session, project, text, cb, ctl, prefs) {
+export async function runAgentTurn(session, project, text, cb, ctl, prefs, images) {
   setWorkingDirectory(project.path);
   const agent = createAgent({ prefs });
   if (Array.isArray(session.messages) && session.messages.length) {
@@ -62,6 +62,7 @@ export async function runAgentTurn(session, project, text, cb, ctl, prefs) {
 
   await agent.chat(text, {
     maxLoops: 40,
+    images,
     onText: cb.onText,
     onToolCall: cb.onToolCall,
     onToolResult: cb.onToolResult,

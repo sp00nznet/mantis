@@ -22,6 +22,7 @@ let pickCb = null;                // folder-picker callback
 let pickCur = null;               // folder-picker current path
 let GIT_CONNS = [];               // git service connections
 let CURRENT_CONN = null;          // selected connection id (git section)
+let pendingAttachments = [];      // images/files staged for the next message
 
 // ─── toast ──────────────────────────────────────────────────────────
 const toastEl = document.createElement('div');
@@ -488,7 +489,7 @@ function setSending(on) {
 async function send() {
   const inp = $('composerInput');
   const text = inp.value.trim();
-  if (sending || !text) return;
+  if (sending || (!text && !pendingAttachments.length)) return;
 
   if (!CURRENT) {
     const s = await M.createSession({ mode: 'chat' });
@@ -499,21 +500,64 @@ async function send() {
     $('messages').innerHTML = '';
     show('chatView');
   }
+
+  // Fold attachments in: images go to the vision channel, text files inline.
+  const images = [];
+  const blocks = [];
+  for (const a of pendingAttachments) {
+    if (a.kind === 'image') images.push(a.dataUrl);
+    else if (a.kind === 'text') blocks.push('Attached file ' + a.name + ':\n```\n' + a.content + '\n```');
+  }
+  let finalText = blocks.length ? (text ? text + '\n\n' : '') + blocks.join('\n\n') : text;
+  if (!finalText) finalText = '(see the attached image)';
+  const attachLabel = pendingAttachments.length
+    ? '  📎 ' + pendingAttachments.map(a => a.name).join(', ') : '';
+
   inp.value = '';
   autoGrow();
-  addMessage('user', text);
+  addMessage('user', (text || '(image)') + attachLabel);
+  pendingAttachments = [];
+  renderAttachChips();
   streamEl = null;
   streamBuf = '';
   showThinking();
   setSending(true);
 
   try {
-    await M.sendMessage(CURRENT, text);
+    await M.sendMessage(CURRENT, finalText, images);
   } catch (e) {
     removeThinking();
     toast('Send failed: ' + e.message, true);
     setSending(false);
   }
+}
+
+// ─── attachments ────────────────────────────────────────────────────
+async function pickAttachments() {
+  const res = await M.pickAttachments();
+  if (!res || !res.files) return;
+  for (const f of res.files) {
+    if (f.error) { toast(f.name + ': ' + f.error, true); continue; }
+    pendingAttachments.push(f);
+  }
+  renderAttachChips();
+}
+function renderAttachChips() {
+  const bar = $('attachChips');
+  if (!bar) return;
+  bar.innerHTML = '';
+  bar.classList.toggle('hidden', pendingAttachments.length === 0);
+  pendingAttachments.forEach((a, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'attach-chip';
+    chip.innerHTML = (a.kind === 'image' ? '🖼 ' : '📄 ') + escapeHtml(a.name) +
+      ' <span class="x" title="remove">✕</span>';
+    chip.querySelector('.x').onclick = () => {
+      pendingAttachments.splice(i, 1);
+      renderAttachChips();
+    };
+    bar.appendChild(chip);
+  });
 }
 function stop() {
   if (CURRENT) M.stopMessage(CURRENT);
@@ -732,6 +776,7 @@ function onNewBtn() {
 function wire() {
   $('newBtn').onclick = onNewBtn;
   $('sendBtn').onclick = () => (sending ? stop() : send());
+  $('attachBtn').onclick = pickAttachments;
   $('chatProvider').onclick = () => selectSection('settings');
   $('chatFilesBtn').onclick = openFiles;
   $('filesBack').onclick = () => show('chatView');

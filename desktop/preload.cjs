@@ -51,8 +51,9 @@ contextBridge.exposeInMainWorld('mantis', {
   listModels: (provider) => ipcRenderer.invoke('config:models', provider),
 
   // chat
-  sendMessage: (sessionId, text) => ipcRenderer.invoke('chat:send', { sessionId, text }),
+  sendMessage: (sessionId, text, images) => ipcRenderer.invoke('chat:send', { sessionId, text, images }),
   stopMessage: (sessionId) => ipcRenderer.invoke('chat:stop', sessionId),
+  pickAttachments: () => ipcRenderer.invoke('attach:pick'),
 
   // streaming events
   onToken: (cb) => ipcRenderer.on('chat:token', (_e, d) => cb(d)),

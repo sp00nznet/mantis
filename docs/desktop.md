@@ -52,6 +52,8 @@ A three-pane layout with an icon rail:
   `~/.mantis/sessions/<id>.json`. Close the app and reopen — your history is
   intact, and clicking a conversation resumes it exactly where you left off.
 - **Auto-titled** — conversations are named from your first message.
+- **Attach images & files** — the 📎 button in the composer attaches images
+  (sent to vision-capable models) or text files (their content is included).
 - **Settings** — pick the active provider and model (the model list is polled
   live from the provider) and set API keys.
 

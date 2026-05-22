@@ -337,9 +337,9 @@ async function handleSessionApi(req, res, parts) {
 
   if (action === 'stream' && req.method === 'GET') return streamSession(req, res, session);
   if (action === 'input' && req.method === 'POST') {
-    const body = await readJson(req);
+    const body = await readJson(req, 12 * 1024 * 1024); // allow image data URLs
     if (!body.text) return sendJson(res, 400, { error: 'text is required' });
-    sendInput(id, String(body.text));
+    sendInput(id, String(body.text), Array.isArray(body.images) ? body.images : undefined);
     return sendJson(res, 200, { ok: true });
   }
   if (action === 'stop' && req.method === 'POST') {
@@ -674,9 +674,9 @@ async function handleShared(req, res, url) {
   }
   if (action === 'input' && req.method === 'POST') {
     if (share.mode !== 'join') return sendJson(res, 403, { error: 'This is a watch-only link' });
-    const body = await readJson(req);
+    const body = await readJson(req, 12 * 1024 * 1024);
     if (!body.text) return sendJson(res, 400, { error: 'text is required' });
-    sendInput(share.sessionId, String(body.text));
+    sendInput(share.sessionId, String(body.text), Array.isArray(body.images) ? body.images : undefined);
     return sendJson(res, 200, { ok: true });
   }
   return sendJson(res, 404, { error: 'No such share route' });
