@@ -33,6 +33,40 @@ export async function runHeadless(task, opts = {}) {
     prefs = { provider: opts.provider, model: opts.model || '' };
   }
 
+  // External agent override (--agent <id>) — short-circuits both native loop
+  // and swarm. The Mantis tool loop is never used; we just stream the CLI's
+  // stdout and exit with its code.
+  if (opts.agent && opts.agent !== 'native') {
+    const { runExternalAgent, resolveAgentSpec } = await import('./external-agents.js');
+    const spec = resolveAgentSpec(opts.agent);
+    if (!spec) {
+      process.stderr.write(`  Unknown external agent: ${opts.agent}\n`);
+      return false;
+    }
+    if (!spec.available) {
+      process.stderr.write(`  Agent "${opts.agent}" is not installed (looking for: ${spec.bin}).\n`);
+      return false;
+    }
+    let txt = '';
+    const tools = [];
+    const handle = runExternalAgent(opts.agent, task, {
+      cwd: opts.cwd ? opts.cwd : process.cwd(),
+      onText: (t) => { txt += t; if (!json) process.stdout.write(t); },
+      onError: (e) => process.stderr.write(`  [${spec.name}] ${e}\n`),
+    });
+    const result = await handle.promise;
+    if (json) {
+      process.stdout.write(JSON.stringify({
+        ok: result.ok, text: txt.trim(), externalAgent: opts.agent,
+        agentName: spec.name, exitCode: result.exitCode, durationMs: result.durationMs,
+        error: result.error,
+      }, null, 2) + '\n');
+    } else {
+      process.stdout.write('\n');
+    }
+    return result.ok;
+  }
+
   const agent = createAgent(prefs ? { prefs } : {});
   await initMcp();
 

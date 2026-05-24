@@ -28,6 +28,7 @@ let _adminServer = null;   // running admin server instance, if any
 let _remoteSession = null; // hub session mirroring this REPL, if /remote is on
 let _pendingImages = []; // data-URL images staged with /image for the next message
 let _soloMode = false;   // when true, plain prompts skip swarm even if swarm.default is on
+let _replAgent = 'native'; // current external agent (claude/codex/…) or 'native' for the built-in loop
 
 // Process-level SIGINT fallback.
 // In raw mode, Ctrl+C produces byte 0x03 which readline handles (rl.on('SIGINT')).
@@ -244,6 +245,33 @@ async function ensureReplShared(agent, rl) {
 }
 
 async function handleUserInput(input, rl, agent, opts = {}) {
+  // External agent override (claude/codex/…) — takes precedence over both
+  // swarm-default and the native agent loop. Skipped for autonomous mode
+  // which has special semantics (and tools).
+  if (!opts.autonomous && _replAgent && _replAgent !== 'native') {
+    const { runExternalAgent, resolveAgentSpec } = await import('./external-agents.js');
+    const { getWorkingDirectory } = await import('./tools.js');
+    const spec = resolveAgentSpec(_replAgent);
+    if (!spec || !spec.available) {
+      console.log(colors.error(`  External agent "${_replAgent}" is not available.\n`));
+      return;
+    }
+    const cwd = getWorkingDirectory();
+    console.log(colors.dim(`  → ${spec.name} (${cwd})`));
+    const startTime = Date.now();
+    let output = '';
+    const handle = runExternalAgent(_replAgent, input, {
+      cwd,
+      onText: (t) => { output += t; process.stdout.write(t); },
+      onError: (e) => process.stderr.write(colors.error('  ' + e + '\n')),
+    });
+    _cancelResolve = handle.cancel;
+    const result = await handle.promise;
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(colors.dim(`\n  via ${spec.name} · ${elapsed}s` + (result.ok ? '' : ' · ' + (result.error || 'failed')) + '\n'));
+    return;
+  }
+
   // Swarm-by-default: route plain prompts through swarm when enabled. Skipped
   // for autonomous mode (which has its own loop semantics), solo mode, or when
   // the pool is too small (silent fallback so users with one key still work).
@@ -1116,6 +1144,52 @@ async function handleCommand(cmd, rl, agent, ask) {
       _autonomousMode = false;
 
       console.log(colors.success('  Autonomous mode complete.\n'));
+      break;
+    }
+
+    // ─── External agent picker ──────────────────────────────────
+    // Route plain prompts to an installed agentic CLI (claude/codex/…)
+    // instead of Mantis's native loop. Persists for the rest of this REPL.
+    case '/agent': {
+      const sub = (args || '').trim();
+      const { listExternalAgents, refreshAvailability, resolveAgentSpec } = await import('./external-agents.js');
+      if (!sub || sub === 'list' || sub === '--list') {
+        console.log(colors.header('\n  External agents'));
+        for (const a of listExternalAgents()) {
+          const tag = a.id === _replAgent ? colors.success('● ACTIVE') :
+                     !a.available ? colors.dim('not installed') :
+                     a.disabled ? colors.dim('disabled') : colors.dim('available');
+          console.log(`    ${(a.id).padEnd(8)} ${a.name.padEnd(22)} ${tag}`);
+        }
+        console.log(colors.dim('\n  Usage: /agent <id|native>  ·  /agent refresh\n'));
+        break;
+      }
+      if (sub === 'refresh') {
+        refreshAvailability();
+        console.log(colors.success('  PATH probe refreshed.\n'));
+        break;
+      }
+      if (sub === 'native') {
+        _replAgent = 'native';
+        console.log(colors.success('  Switched to native Mantis loop.\n'));
+        break;
+      }
+      const spec = resolveAgentSpec(sub);
+      if (!spec) { console.log(colors.error(`  Unknown agent "${sub}". Try /agent list\n`)); break; }
+      if (!spec.available) {
+        console.log(colors.error(`  "${sub}" is not on PATH (looking for: ${spec.bin}).`));
+        console.log(colors.dim('  Install the CLI and run /agent refresh.\n'));
+        break;
+      }
+      if (spec.disabled) {
+        console.log(colors.warning(`  "${sub}" is marked high-risk and disabled by default.`));
+        console.log(colors.dim(`  Enable it: set config.externalAgents.${sub}.enabled = true\n`));
+        break;
+      }
+      _replAgent = sub;
+      console.log(colors.success(`  ${spec.name} will answer plain prompts.`));
+      if (spec.risk === 'high') console.log(colors.warning('  ⚠ This agent auto-approves all tool calls.\n'));
+      else console.log('');
       break;
     }
 
