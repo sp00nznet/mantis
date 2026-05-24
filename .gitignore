@@ -10,3 +10,5 @@ desktop/dist/
 # OS junk
 .DS_Store
 Thumbs.db
+*.tar.gz
+electron-cache-bundle.tar.gz

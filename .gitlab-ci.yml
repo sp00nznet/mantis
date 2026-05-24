@@ -33,6 +33,7 @@
 # ============================================================================
 
 stages:
+  - bootstrap
   - build
   - test
   - package
@@ -67,6 +68,70 @@ workflow:
     key: "$CI_COMMIT_REF_SLUG-$CI_JOB_STAGE-$CI_RUNNER_TAGS"
     paths:
       - .npm/
+
+# ─── bootstrap ──────────────────────────────────────────────────────────────
+# Two manual jobs you run ONCE to populate the debian-runner's electron cache
+# when its egress is restricted (can't reach github.com or npmmirror.com).
+# Symptom: package:desktop:linux hangs forever on `npm install` at electron's
+# postinstall. Fix:
+#
+#   1. Trigger `bootstrap:prepare-electron-cache` from the GitLab web UI
+#      (Pipelines → Run pipeline). It runs on the macOS runner (which CAN
+#      reach GitHub) and uploads electron-cache-bundle.tar.gz as an artifact.
+#
+#   2. Trigger `bootstrap:install-electron-cache`. It runs on the debian
+#      runner, pulls the artifact from Job 1, and extracts it into
+#      ~/.cache/electron and ~/.cache/electron-builder. From then on,
+#      every desktop:linux build skips the network download.
+#
+# Re-run both jobs whenever desktop/package.json bumps electron's version.
+
+# ─── Artifact size note ─────────────────────────────────────────────────────
+# The bundle is ~103 MB (Electron itself is ~101 MB compressed). GitLab CE's
+# default max_artifacts_size is 100 MB → 413 Payload Too Large on upload.
+# Bump it BEFORE running these jobs:
+#
+#   Admin Area → Settings → CI/CD → Continuous Integration and Deployment
+#   → Maximum artifacts size (MB):  bump 100 → 500
+#
+# Or by API:
+#   curl --request PUT --header "PRIVATE-TOKEN: <admin-token>" \
+#     "https://buildforever.cloud/api/v4/application/settings?max_artifacts_size=500"
+#
+# That bump also unblocks future fat releases (DMG, AppImage, big EXEs).
+
+bootstrap:prepare-electron-cache:
+  stage: bootstrap
+  tags: [macos, darwin, shell]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+    - when: manual
+  needs: []
+  script:
+    - bash scripts/runner-electron-cache.sh prepare
+    - ls -lh electron-cache-bundle.tar.gz
+  artifacts:
+    name: "electron-cache-bundle"
+    paths:
+      - electron-cache-bundle.tar.gz
+    expire_in: 30 days
+
+bootstrap:install-electron-cache:
+  stage: bootstrap
+  tags: [linux, debian, shell]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+    - when: manual
+  needs:
+    - job: bootstrap:prepare-electron-cache
+      artifacts: true
+  script:
+    - ls -lh electron-cache-bundle.tar.gz
+    - bash scripts/runner-electron-cache.sh install electron-cache-bundle.tar.gz
+    - rm -f electron-cache-bundle.tar.gz
+    - echo "Cache populated. Next desktop:linux build will skip the GitHub download."
 
 # ─── build ──────────────────────────────────────────────────────────────────
 # Install root + desktop deps. Verifies tree resolves on every push.
