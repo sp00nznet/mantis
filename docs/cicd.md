@@ -65,6 +65,18 @@ The macOS runner additionally needs:
 The Linux runner additionally needs:
 - `fakeroot`, `dpkg`, `rpm` — `sudo apt install -y fakeroot dpkg rpm`
 - `libarchive-tools` (for `.deb`/`.rpm` from electron-builder)
+- **Pre-populated electron cache** if egress to github.com / npmmirror.com is
+  blocked. Symptom: `package:desktop:linux` hangs forever on `npm install` at
+  electron's postinstall. Fix:
+  ```bash
+  # On a machine that CAN reach GitHub:
+  bash scripts/runner-electron-cache.sh prepare
+  scp electron-cache-bundle.tar.gz gitlab-runner@<debian-host>:/tmp/
+
+  # On the debian-runner, as gitlab-runner user:
+  bash scripts/runner-electron-cache.sh install /tmp/electron-cache-bundle.tar.gz
+  ```
+  Re-run prepare whenever `desktop/package.json` bumps electron.
 
 ## SMB deploy variables
 
