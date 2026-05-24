@@ -216,15 +216,34 @@
 
   /* ── Mobile ── */
   @media (max-width: 720px) {
-    #app { flex-direction: column; }
+    /* Use dynamic viewport height — on iOS Safari and mobile Chrome,
+       100vh exceeds the visible area (URL bar takes space), pushing the
+       bottom rail out of reach. 100dvh accounts for the chrome. */
+    #app { flex-direction: column; height: 100dvh; }
+    /* Position the rail FIXED to the bottom of the viewport so it's
+       always reachable regardless of scroll position or browser chrome. */
     #rail {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
       width: 100%; height: 56px; flex: 0 0 56px; flex-direction: row;
-      order: 2; border-right: 0; border-top: 1px solid var(--border);
-      padding: 0 6px; justify-content: space-around;
+      border-right: 0; border-top: 1px solid var(--border);
+      padding: 0 4px; gap: 0;
+      /* Distribute icons evenly and let them shrink if the screen is narrow. */
+      justify-content: space-around; align-items: center;
+      /* Inset for iOS notch / home indicator. */
+      padding-bottom: env(safe-area-inset-bottom);
+      height: calc(56px + env(safe-area-inset-bottom));
     }
     .rail-logo, .rail-spacer { display: none; }
-    #userChip { margin: 0; }
-    main { order: 1; flex: 1; padding: 16px 14px; }
+    /* Make sure every rail tab is hit-targetable on mobile. */
+    nav#rail a { width: 44px; height: 44px; font-size: 18px; flex-shrink: 0; }
+    nav#rail a.active { box-shadow: inset 0 2px 0 var(--accent); }
+    #userChip { margin: 0; width: 36px; height: 36px; flex-shrink: 0; }
+    /* Main fills the rest of the viewport, plus padding so its bottom
+       content doesn't hide behind the fixed rail. */
+    main {
+      flex: 1; padding: 16px 14px;
+      padding-bottom: calc(72px + env(safe-area-inset-bottom));
+    }
     .row { flex-direction: column; align-items: stretch; }
     .row > button { width: 100%; }
     .grid3 { grid-template-columns: 1fr; }
@@ -235,6 +254,12 @@
     .modal-box { width: 96vw; }
     .view-head h1 { font-size: 16px; }
     .login-card { padding: 32px 26px; }
+  }
+  /* Some mobile browsers don't support 100dvh — fall back to 100vh. */
+  @supports not (height: 100dvh) {
+    @media (max-width: 720px) {
+      #app { height: 100vh; }
+    }
   }
 </style>
 </head>
