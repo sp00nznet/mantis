@@ -35,13 +35,35 @@ Mantis discovers these by probing `PATH` (+ `PATHEXT` on Windows):
 
 In any chat, the composer has a small dropdown left of the **Send** button.
 Pick the agent — it's persisted on the session so reopening it keeps the
-choice. Native is always there; only installed external CLIs appear.
+choice. Native is always there; only installed (and enabled) external CLIs
+appear.
 
 When an external agent answers, the assistant bubble shows a small footer:
 
 ```
 via Claude Code · 12.4s
 ```
+
+If you pick a non-native agent in a chat-mode session (no project bound),
+a confirm dialog warns you that the cwd-guard will reject the spawn —
+switch to a project session first, or click through to proceed knowing
+the next message will error out.
+
+#### Settings → External Agents
+
+`Settings → External Agents` lists every registered agent with:
+
+- **Status tag** — `available` (on PATH, enabled), `disabled` (high-risk and
+  not yet enabled), `not installed` (binary not on PATH).
+- **Risk tag** — `medium`, `high`, or `unknown`.
+- **Binary path** — the absolute path the PATH probe resolved, or
+  `(not found)`. Useful for diagnosing PATH issues.
+- **Enable** checkbox — only shown for installed high-risk agents.
+  Toggling on pops a confirm dialog spelling out what the CLI does
+  (auto-approves all tool calls, modifies files, commits to git, etc.).
+
+A **⟳ Re-scan PATH** button picks up newly-installed CLIs without
+restarting the app.
 
 ### Admin web UI
 
@@ -88,13 +110,15 @@ CLI's tool-call history lives in that CLI's own conversation log.
 External agents always need a real project folder — they edit files on disk.
 
 - **Desktop agent-mode session** → uses the project folder you opened.
-- **Desktop chat-mode session** → currently falls back to `$HOME`, which the
-  cwd-guard rejects (you'll see an error). Pick a project first.
+- **Desktop chat-mode session** → no project; selecting a non-native agent
+  triggers a cwd-guard warning (see above). If you click through, the next
+  send returns an error from the engine.
 - **REPL** → uses the REPL's working directory (`/cd <path>` to change).
 - **Headless** → uses `--cwd <path>` or `process.cwd()`.
 
-Mantis refuses to spawn external agents at `$HOME` or `/` — too easy to nuke
-the wrong files by accident.
+Mantis refuses to spawn external agents at `$HOME` or `/` — the cwd-guard
+in `runExternalAgent()` returns `Refusing to spawn <id> at <cwd> — pick a
+project folder first` before any subprocess starts.
 
 ## Auth
 
@@ -105,7 +129,9 @@ in / configured — which is the design intent: keep keys siloed.
 
 ## Enabling a high-risk agent
 
-In `~/.mantis/config.json`:
+**Easiest:** Desktop → Settings → External Agents → toggle the checkbox.
+
+**By hand** in `~/.mantis/config.json`:
 
 ```json
 {
@@ -120,6 +146,29 @@ You can also pin an explicit absolute path to the binary
 (`bin: "C:\\Users\\me\\AppData\\Local\\…\\claude.cmd"`) or set per-agent
 env vars (`env: { ANTHROPIC_API_KEY: "…" }`). The merge order is the
 built-in registry first, then your override.
+
+The Settings card only writes the `enabled` field; if you want to set
+`bin`, `extraArgs`, or `env`, edit `config.json` directly.
+
+## Verifying it works
+
+Easiest smoke test — assuming `claude` is on your PATH:
+
+```bash
+$ mantis run "in one short sentence, what is 2+2?" --agent claude --json
+{
+  "ok": true,
+  "text": "4",
+  "externalAgent": "claude",
+  "agentName": "Claude Code",
+  "exitCode": 0,
+  "durationMs": 4103
+}
+```
+
+If it errors `Agent "claude" is not installed`, the CLI isn't on the
+gitlab-runner / shell's PATH. Resolve with `bin:` in config or by adding
+the dir to PATH.
 
 ## Known limitations
 
