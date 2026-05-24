@@ -31,10 +31,29 @@ import * as users from './users.js';
 import * as accounts from './accounts.js';
 import { getShare } from './shares.js';
 
-const ADMIN_DIR = path.dirname(fileURLToPath(import.meta.url));
-const HTML_PATH = path.join(ADMIN_DIR, 'admin.html');
-const SHARED_HTML_PATH = path.join(ADMIN_DIR, 'shared.html');
-const ASSETS_DIR = path.join(ADMIN_DIR, 'assets');
+// In a normal `npm install` ESM run, import.meta.url points at src/admin.js
+// and we use that to find sibling HTML/assets. In the SEA single-exe build
+// the code is bundled to CJS and import.meta is empty — fall back to the
+// directory of the executable, where build-sea.mjs ships the HTML files.
+const ADMIN_DIR = (() => {
+  try {
+    const u = import.meta && import.meta.url;
+    if (u) return path.dirname(fileURLToPath(u));
+  } catch { /* ignore */ }
+  return path.dirname(process.execPath);
+})();
+// Dual-location asset lookup: source-relative for `npm install` use, exec-
+// relative for the SEA single-exe build. First match wins.
+function resolveAsset(name) {
+  const here = path.join(ADMIN_DIR, name);
+  if (fs.existsSync(here)) return here;
+  const beside = path.join(path.dirname(process.execPath), name);
+  if (fs.existsSync(beside)) return beside;
+  return here;
+}
+const HTML_PATH = resolveAsset('admin.html');
+const SHARED_HTML_PATH = resolveAsset('shared.html');
+const ASSETS_DIR = resolveAsset('assets');
 
 // ─── Access helpers ─────────────────────────────────────────────────
 

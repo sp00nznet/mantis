@@ -111,6 +111,12 @@
         </div>
       </div>
       <div class="card">
+        <h2>Swarm</h2>
+        <p class="hint" style="margin-top:0">When on, plain prompts run through the multi-provider swarm (PLAN → EXPLORE → CODE → REVIEW). Needs at least 2 providers with API keys.</p>
+        <label><input type="checkbox" id="setSwarmDefault" style="width:auto; margin-right:8px"> Use swarm by default</label>
+        <p class="hint" id="swarmPoolHint"></p>
+      </div>
+      <div class="card">
         <h2>API key</h2>
         <label id="keyLabel">API key</label>
         <div class="field-row">
@@ -118,6 +124,29 @@
           <button id="saveKey">Save</button>
         </div>
         <p class="hint">Keys are shared with the Mantis CLI (~/.mantis/config.json).</p>
+      </div>
+      <div class="card">
+        <h2>Local backends</h2>
+        <p class="hint" style="margin-top:0">URLs for local model servers. Leave blank to use the default. Ollama models appear in the Model dropdown when "Local (Ollama)" is the active provider.</p>
+        <label>Ollama URL</label>
+        <div class="field-row">
+          <input id="setOllamaUrl" placeholder="http://localhost:11434">
+          <button id="saveOllamaUrl">Save</button>
+          <button class="ghost" id="testOllama" title="List models from this URL">Test</button>
+        </div>
+        <label style="margin-top:14px">LM Studio base URL</label>
+        <div class="field-row">
+          <input id="setLmstudioUrl" placeholder="http://localhost:1234/v1">
+          <button id="saveLmstudioUrl">Save</button>
+          <button class="ghost" id="testLmstudio" title="List models">Test</button>
+        </div>
+        <label style="margin-top:14px">llama.cpp base URL</label>
+        <div class="field-row">
+          <input id="setLlamacppUrl" placeholder="http://localhost:8080/v1">
+          <button id="saveLlamacppUrl">Save</button>
+          <button class="ghost" id="testLlamacpp" title="List models">Test</button>
+        </div>
+        <p class="hint" id="localBackendsOut" style="white-space:pre-wrap"></p>
       </div>
       <div class="card">
         <h2>Workspace</h2>

@@ -49,6 +49,10 @@ contextBridge.exposeInMainWorld('mantis', {
   setProjectsDir: (dir) => ipcRenderer.invoke('config:setProjectsDir', dir),
   setTheme: (id) => ipcRenderer.invoke('config:setTheme', id),
   listModels: (provider) => ipcRenderer.invoke('config:models', provider),
+  getLocalUrls: () => ipcRenderer.invoke('config:getLocalUrls'),
+  setLocalUrl: (provider, url) => ipcRenderer.invoke('config:setLocalUrl', { provider, url }),
+  setSwarmDefault: (on) => ipcRenderer.invoke('config:setSwarmDefault', on),
+  swarmInfo: () => ipcRenderer.invoke('config:swarmInfo'),
 
   // chat
   sendMessage: (sessionId, text, images) => ipcRenderer.invoke('chat:send', { sessionId, text, images }),

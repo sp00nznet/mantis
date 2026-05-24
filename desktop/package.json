@@ -4,11 +4,87 @@
   "description": "Mantis Desktop — chat, projects, and git in a Claude-style app",
   "main": "main.js",
   "type": "module",
+  "author": {
+    "name": "Mantis",
+    "email": "noreply@mantis.local"
+  },
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win nsis portable",
+    "dist:linux": "electron-builder --linux AppImage deb",
+    "dist:mac": "electron-builder --mac dmg"
   },
   "devDependencies": {
-    "electron": "^33.3.1"
+    "electron": "^33.3.1",
+    "electron-builder": "^25.1.8"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "build": {
+    "appId": "com.mantis.desktop",
+    "productName": "Mantis Desktop",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main.js",
+      "preload.cjs",
+      "chat.js",
+      "store.js",
+      "projects.js",
+      "git.js",
+      "renderer/**/*",
+      "assets/**/*",
+      "../src/**/*",
+      "../bin/**/*",
+      "!../src/**/*.test.js",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
+      "!**/node_modules/.bin",
+      "!**/{.DS_Store,.git,.gitignore,.eslintrc,.prettierrc}"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "../src/admin.html",
+      "../src/shared.html",
+      "../src/assets/**/*"
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "artifactName": "Mantis-Desktop-${version}-${os}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "shortcutName": "Mantis Desktop"
+    },
+    "mac": {
+      "icon": "assets/icon.png",
+      "category": "public.app-category.developer-tools",
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] }
+      ],
+      "identity": null,
+      "artifactName": "Mantis-Desktop-${version}-${os}-${arch}.${ext}"
+    },
+    "dmg": {
+      "writeUpdateInfo": false
+    },
+    "linux": {
+      "icon": "assets/icon.png",
+      "category": "Development",
+      "target": [
+        { "target": "AppImage", "arch": ["x64"] },
+        { "target": "deb",      "arch": ["x64"] }
+      ],
+      "artifactName": "Mantis-Desktop-${version}-${os}-${arch}.${ext}"
+    }
+  }
 }

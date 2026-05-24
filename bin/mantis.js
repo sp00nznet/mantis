@@ -83,11 +83,13 @@ async function main() {
         else if (a === '--cwd') opts.cwd = rest[++i];
         else if (a === '--provider') opts.provider = rest[++i];
         else if (a === '--model') opts.model = rest[++i];
+        else if (a === '--solo' || a === '--no-swarm') opts.solo = true;
+        else if (a === '--swarm') opts.swarm = true;
         else positional.push(a);
       }
       const task = positional.join(' ').trim();
       if (!task) {
-        console.error('  Usage: mantis run "<task>" [--json] [--cwd <dir>] [--provider <name>] [--model <name>]');
+        console.error('  Usage: mantis run "<task>" [--json] [--cwd <dir>] [--provider <name>] [--model <name>] [--solo|--no-swarm|--swarm]');
         process.exit(1);
       }
       const { runHeadless } = await import('../src/headless.js');

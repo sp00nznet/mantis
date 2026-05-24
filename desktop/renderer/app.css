@@ -160,8 +160,9 @@ body.has-bg #chatView::before {
 #settingsView h1 { font-size: 19px; margin-bottom: 16px; }
 .card {
   background: var(--surface); border: 1px solid var(--border); border-radius: 9px;
-  padding: 16px 18px; margin-bottom: 16px; max-width: 620px;
+  padding: 16px 18px; margin-bottom: 16px;
 }
+#settingsView .card { max-width: 960px; }     /* roomy but capped on ultra-wide */
 .card h2 { font-size: 13px; color: var(--accent2); margin-bottom: 12px; }
 label { display: block; color: var(--dim); font-size: 11px; margin: 8px 0 4px; }
 input, select {

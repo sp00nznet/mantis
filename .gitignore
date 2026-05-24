@@ -1,2 +1,12 @@
 node_modules/
 .qwen-local/
+
+# Build outputs
+dist/
+releases/
+.npm/
+desktop/dist/
+
+# OS junk
+.DS_Store
+Thumbs.db

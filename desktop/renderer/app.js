@@ -827,6 +827,62 @@ function wire() {
     if (r && r.ok) { toast('API key saved'); renderSettings(); }
     else toast((r && r.error) || 'Failed', true);
   };
+
+  // ── Swarm toggle ──
+  const sw = await M.swarmInfo();
+  $('setSwarmDefault').checked = !!sw.default;
+  const renderPoolHint = (info) => {
+    const poolText = info.pool.length
+      ? `Pool: ${info.pool.join(', ')} (${info.pool.length} provider${info.pool.length === 1 ? '' : 's'})`
+      : 'No swarm-ready providers yet — add API keys to enable.';
+    const note = info.pool.length < info.minPoolSize && info.default
+      ? '  · Fewer than minPoolSize — swarm silently falls back to solo until more keys are set.'
+      : '';
+    $('swarmPoolHint').textContent = poolText + note;
+  };
+  renderPoolHint(sw);
+  $('setSwarmDefault').onchange = async () => {
+    const r = await M.setSwarmDefault($('setSwarmDefault').checked);
+    if (r && r.ok) {
+      toast('Swarm default ' + ($('setSwarmDefault').checked ? 'enabled' : 'disabled'));
+      renderPoolHint(await M.swarmInfo());
+    } else {
+      toast('Failed', true);
+    }
+  };
+
+  // ── Local backend URLs (Ollama / LM Studio / llama.cpp) ──
+  const urls = await M.getLocalUrls();
+  $('setOllamaUrl').value = urls.ollamaUrl || '';
+  $('setLmstudioUrl').value = (urls.localUrls && urls.localUrls.lmstudio) || '';
+  $('setLlamacppUrl').value = (urls.localUrls && urls.localUrls.llamacpp) || '';
+  const wireLocalUrl = (prov, inputId, btnId, testId) => {
+    $(btnId).onclick = async () => {
+      const r = await M.setLocalUrl(prov, $(inputId).value);
+      if (r && r.ok) {
+        toast('Saved');
+        // If they just configured the active provider, refresh the model list.
+        if ($('setProvider').value === prov) fillModels(prov, $('setModel').value);
+      } else toast((r && r.error) || 'Failed', true);
+    };
+    $(testId).onclick = async () => {
+      const out = $('localBackendsOut');
+      out.textContent = `Listing models from ${prov}…`;
+      // Save first so listModels sees the URL.
+      await M.setLocalUrl(prov, $(inputId).value);
+      const d = await M.listModels(prov);
+      if (d.error) {
+        out.textContent = `${prov}: ${d.error}`;
+      } else if (!d.models || !d.models.length) {
+        out.textContent = `${prov}: server reachable but returned no models. For Ollama, run \`ollama pull qwen3-coder:7b\` (or any model).`;
+      } else {
+        out.textContent = `${prov}: ${d.models.length} model(s) — ${d.models.slice(0, 8).join(', ')}${d.models.length > 8 ? ', …' : ''}`;
+      }
+    };
+  };
+  wireLocalUrl('local',    'setOllamaUrl',    'saveOllamaUrl',    'testOllama');
+  wireLocalUrl('lmstudio', 'setLmstudioUrl',  'saveLmstudioUrl',  'testLmstudio');
+  wireLocalUrl('llamacpp', 'setLlamacppUrl',  'saveLlamacppUrl',  'testLlamacpp');
   $('browseProjectsDir').onclick = () => {
     openPicker('Choose projects folder', $('setProjectsDir').value.trim() || null, (dir) => {
       $('setProjectsDir').value = dir;

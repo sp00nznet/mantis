@@ -10,6 +10,31 @@ import { callLLM, createAgent } from '../src/agent.js';
 import { getConfig, PROVIDERS, buildConnection } from '../src/config.js';
 import { setWorkingDirectory } from '../src/tools.js';
 import { buildChatPrompt } from '../src/prompt.js';
+import { runSwarm, getSwarmPool } from '../src/swarm.js';
+
+function shouldSwarm(prefs, sessionSolo) {
+  if (sessionSolo) return false;
+  const cfg = getConfig();
+  if (!cfg.swarm?.default) return false;
+  const minPool = cfg.swarm?.minPoolSize ?? 2;
+  return getSwarmPool().length >= minPool;
+}
+
+async function runSwarmTurn(task, cb, ctl) {
+  const swarm = runSwarm(task, {
+    onText: cb.onText || (() => {}),
+    onToolCall: cb.onToolCall || (() => {}),
+    onToolResult: cb.onToolResult || (() => {}),
+    onStatus: (type, provider, data) => {
+      if (!cb.onThinking) return;
+      if (type === 'pool') cb.onThinking(`swarm pool: ${data.pool.join(', ')}`);
+      else if (type === 'phase') cb.onThinking(`swarm ${data}`);
+      else if (type === 'error') cb.onError && cb.onError(`swarm: ${data}`);
+    },
+  });
+  if (ctl) ctl.swarmCancel = swarm.cancel;
+  return swarm.promise;
+}
 
 /**
  * Run one chat turn for a session. `session.messages` holds the prior
@@ -18,6 +43,18 @@ import { buildChatPrompt } from '../src/prompt.js';
  * @returns {Promise<{role:string,content:string}|null>}
  */
 export async function runChatTurn(session, { onText, onError, onThinking }, isCancelled, prefs) {
+  // Swarm-by-default also covers chat mode (per user request). Note: swarm
+  // uses tools so casual chat ("hi") will trigger a plan/explore loop —
+  // toggle solo for snappy single-model replies.
+  if (shouldSwarm(prefs, session.solo)) {
+    const lastUser = [...session.messages].reverse().find(m => m.role === 'user');
+    const task = lastUser ? (typeof lastUser.content === 'string' ? lastUser.content : '') : '';
+    if (task) {
+      await runSwarmTurn(task, { onText, onError, onThinking }, {});
+      return null;
+    }
+  }
+
   const config = getConfig();
   const providerKey = session.provider || (prefs && prefs.provider) || config.provider;
   const model = session.model || (prefs && prefs.model) || undefined;
@@ -54,6 +91,17 @@ export async function runChatTurn(session, { onText, onError, onThinking }, isCa
  */
 export async function runAgentTurn(session, project, text, cb, ctl, prefs, images) {
   setWorkingDirectory(project.path);
+
+  // Swarm-by-default: route through the swarm orchestrator unless the session
+  // is in solo mode or the pool is too small (silent fallback to single agent).
+  if (shouldSwarm(prefs, session.solo)) {
+    await runSwarmTurn(text, cb, ctl);
+    // Note: swarm doesn't update session.messages — caller treats it as one
+    // assistant turn. UI shows streamed tokens; session.messages stays append-
+    // only on the user text + a synthetic assistant message added by the caller.
+    return;
+  }
+
   const agent = createAgent({ prefs });
   if (Array.isArray(session.messages) && session.messages.length) {
     agent.setMessages(session.messages);
@@ -83,9 +131,14 @@ export async function listModels(providerKey, prefs) {
   if (!p) return { error: 'Unknown provider', models: [] };
 
   const ollamaUrl = (prefs && prefs.ollamaUrl) || config.ollamaUrl;
-  const base = providerKey === 'local'
-    ? `${ollamaUrl.replace(/\/+$/, '')}/v1`
-    : p.baseUrl.replace(/\/+$/, '');
+  const localUrls = (prefs && prefs.localUrls) || config.localUrls || {};
+  let base;
+  if (providerKey === 'local') {
+    base = `${ollamaUrl.replace(/\/+$/, '')}/v1`;
+  } else {
+    const override = (localUrls[providerKey] || '').trim();
+    base = (override || p.baseUrl).replace(/\/+$/, '');
+  }
   const headers = { 'Content-Type': 'application/json' };
   const keys = (prefs && prefs.providerKeys) || config.providerKeys || {};
   const apiKey = keys[providerKey];

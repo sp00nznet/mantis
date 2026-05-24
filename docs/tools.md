@@ -299,9 +299,35 @@ Generates an image from a text prompt and saves it to a file.
 | `size` | string | no | e.g. `1024x1024`, `1536x1024` |
 
 **Behavior:**
-- Calls an OpenAI-compatible `/images/generations` endpoint — provider/model in
-  `config.imageGen`, API key from `providerKeys`
+- Three backends, chosen by `config.imageGen.provider`:
+  - **OpenAI-compat** (`openai`, `together`, `fireworks`, or any local shim) — calls
+    `/v1/images/generations`. Together's `black-forest-labs/FLUX.1-schnell-Free` works on
+    the free tier. Set `imageGen.baseUrl` to point at a local OpenAI-compat server
+    (ComfyUI's OpenAI-Compatible-API extension, `sd-webui-openai-images-api`, etc.) — no
+    API key required for loopback URLs.
+  - **NVIDIA NIM** (`provider: 'nvidia'`) — calls `https://ai.api.nvidia.com/v1/genai/<model>`
+    with the same free key as chat models. Default model `black-forest-labs/flux.1-schnell`.
+    Also supports `stabilityai/sdxl-turbo`, `stabilityai/stable-diffusion-3-medium`, etc.
+  - **Automatic1111** (`provider: 'a1111'`) — calls `<baseUrl>/sdapi/v1/txt2img` on a
+    local Stable Diffusion WebUI (default port 7860). No API key. Extra `imageGen` keys:
+    `negative_prompt`, `steps`, `cfg_scale`, `sampler`, `model` (checkpoint override).
 - Useful for icons, illustrations, and placeholder assets
+
+**Example config snippets:**
+
+```json
+// NVIDIA NIM (free key)
+"imageGen": { "provider": "nvidia", "model": "black-forest-labs/flux.1-schnell" }
+
+// Together AI (FLUX)
+"imageGen": { "provider": "together", "model": "black-forest-labs/FLUX.1-schnell" }
+
+// Local Stable Diffusion WebUI
+"imageGen": { "provider": "a1111", "baseUrl": "http://127.0.0.1:7860", "steps": 25 }
+
+// Local ComfyUI / SD-WebUI with OpenAI-compat shim
+"imageGen": { "provider": "openai", "baseUrl": "http://127.0.0.1:7860/v1", "model": "flux-schnell" }
+```
 
 ## generate_speech
 

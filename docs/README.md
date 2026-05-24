@@ -25,5 +25,6 @@ Guides for using and understanding Mantis. New here? Start with
 
 ## Internals
 
-- [Tools](tools.md) — the 10 built-in tools the model can call
+- [Tools](tools.md) — the 15 built-in tools the model can call
 - [Architecture](architecture.md) — how Mantis works under the hood
+- [CI/CD](cicd.md) — GitLab pipeline, single-exe CLI, desktop installers

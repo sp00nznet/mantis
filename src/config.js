@@ -184,6 +184,13 @@ export const PROVIDERS = {
 
 const DEFAULTS = {
   ollamaUrl: 'http://localhost:11434',
+  // Per-provider base URL overrides for local backends (LM Studio, llama.cpp,
+  // or any self-hosted OpenAI-compat shim). Empty string = use the provider's
+  // registry default. Ollama keeps using `ollamaUrl` above for back-compat.
+  localUrls: {
+    lmstudio: '',
+    llamacpp: '',
+  },
   model: 'qwen3-coder-cpu',
   maxContextTokens: 32768,
   compactThreshold: 0.75,  // compact when context is 75% full
@@ -196,11 +203,13 @@ const DEFAULTS = {
   projectsDir: '',           // desktop app: where new projects & clones go ('' = ~/MantisProjects)
   adminTheme: 'mantis',      // admin panel colour theme id
   swarm: {
+    default: true,            // when true, plain prompts run via swarm (set false for solo by default)
     leadProvider: null,       // null = auto-select, or 'groq', 'claude', etc.
     maxParallelWorkers: 4,    // cap parallel exploration workers
     excludeProviders: [],     // providers excluded from swarm pool
     bestOfN: 0,               // 0 = off, 2-3 = send code tasks to N providers, pick best
     providerModels: {},       // override default models per provider: { groq: 'llama-3.3-70b', local: 'qwen2.5-coder:14b' }
+    minPoolSize: 2,           // if fewer than this many providers have keys, fall back to solo silently
   },
   // Anthropic-compatible proxy — lets real Claude Code / VS Code / JetBrains
   // route through Mantis's provider pool. See `mantis serve`.
@@ -273,7 +282,7 @@ export function loadConfig() {
       config = { ...DEFAULTS, ...saved };
       // Deep-merge nested config objects so new default keys survive an old
       // config.json that predates them (shallow spread would drop them).
-      for (const k of ['swarm', 'proxy', 'bots', 'transcription', 'hooks', 'imageGen', 'speech', 'admin', 'auth', 'google']) {
+      for (const k of ['swarm', 'proxy', 'bots', 'transcription', 'hooks', 'imageGen', 'speech', 'admin', 'auth', 'google', 'localUrls']) {
         config[k] = { ...DEFAULTS[k], ...(saved[k] || {}) };
       }
       config.proxy.routes = { ...DEFAULTS.proxy.routes, ...(saved.proxy?.routes || {}) };
@@ -282,6 +291,18 @@ export function loadConfig() {
     } catch {
       // Corrupted config, use defaults
     }
+  }
+  // Auto-pick provider: if the active provider has no key (or is unset), fall
+  // back to the first provider that DOES have a saved key. So a fresh deploy
+  // with only an NVIDIA key set will launch on NVIDIA instead of dead-ending
+  // on default 'local' (Ollama may not be installed). 'local' never needs a key.
+  const active = PROVIDERS[config.provider];
+  const activeKey = (config.providerKeys || {})[config.provider];
+  const activeWorks = active && (!active.requiresKey || activeKey);
+  if (!activeWorks) {
+    const keyed = Object.entries(config.providerKeys || {})
+      .find(([k, v]) => v && PROVIDERS[k]);
+    if (keyed) config.provider = keyed[0];
   }
   return config;
 }
@@ -313,13 +334,17 @@ export function buildConnection(providerKey, modelOverride, prefs) {
   // prefs (a per-user prefs object) override the global config when given.
   const keys = (prefs && prefs.providerKeys) || config.providerKeys || {};
   const ollamaUrl = (prefs && prefs.ollamaUrl) || config.ollamaUrl;
+  const localUrls = (prefs && prefs.localUrls) || config.localUrls || {};
 
   const headers = { 'Content-Type': 'application/json' };
   let url;
   if (providerKey === 'local') {
     url = `${ollamaUrl.replace(/\/+$/, '')}/v1/chat/completions`;
   } else {
-    url = `${provider.baseUrl.replace(/\/+$/, '')}/chat/completions`;
+    // Per-user override for local OpenAI-compat backends (LM Studio, llama.cpp).
+    const baseOverride = (localUrls[providerKey] || '').trim();
+    const base = baseOverride || provider.baseUrl;
+    url = `${base.replace(/\/+$/, '')}/chat/completions`;
     if (keys[providerKey]) headers['Authorization'] = `Bearer ${keys[providerKey]}`;
   }
 

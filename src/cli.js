@@ -27,6 +27,7 @@ let _proxyServer = null;   // running proxy server instance, if any
 let _adminServer = null;   // running admin server instance, if any
 let _remoteSession = null; // hub session mirroring this REPL, if /remote is on
 let _pendingImages = []; // data-URL images staged with /image for the next message
+let _soloMode = false;   // when true, plain prompts skip swarm even if swarm.default is on
 
 // Process-level SIGINT fallback.
 // In raw mode, Ctrl+C produces byte 0x03 which readline handles (rl.on('SIGINT')).
@@ -243,6 +244,23 @@ async function ensureReplShared(agent, rl) {
 }
 
 async function handleUserInput(input, rl, agent, opts = {}) {
+  // Swarm-by-default: route plain prompts through swarm when enabled. Skipped
+  // for autonomous mode (which has its own loop semantics), solo mode, or when
+  // the pool is too small (silent fallback so users with one key still work).
+  if (!opts.autonomous && !_soloMode && !opts.solo) {
+    const cfg = getConfig();
+    if (cfg.swarm?.default) {
+      try {
+        const { getSwarmPool } = await import('./swarm.js');
+        const pool = getSwarmPool();
+        const minSize = cfg.swarm.minPoolSize ?? 2;
+        if (pool.length >= minSize) {
+          return await handleSwarmRun(input, null, rl, agent);
+        }
+      } catch { /* fall through to solo agent.chat */ }
+    }
+  }
+
   _isBusy = true;
   _aborted = false;
 
@@ -1101,6 +1119,26 @@ async function handleCommand(cmd, rl, agent, ask) {
       break;
     }
 
+    // ─── Solo toggle ────────────────────────────────────────────
+    // Per-session override: turn off swarm-by-default for plain prompts.
+    case '/solo': {
+      const sub = (args || '').trim().toLowerCase();
+      if (sub === 'on' || sub === '') {
+        _soloMode = true;
+        console.log(colors.success('  Solo mode ON — plain prompts use a single provider (swarm bypassed).\n'));
+      } else if (sub === 'off') {
+        _soloMode = false;
+        const cfgOn = getConfig().swarm?.default;
+        console.log(colors.success(`  Solo mode OFF — swarm.default is ${cfgOn ? 'ON' : 'OFF'} in config.\n`));
+      } else if (sub === 'status') {
+        const cfgOn = getConfig().swarm?.default;
+        console.log(`  Solo: ${_soloMode ? 'ON' : 'OFF'} | swarm.default in config: ${cfgOn ? 'ON' : 'OFF'}\n`);
+      } else {
+        console.log(colors.error('  Usage: /solo [on|off|status]\n'));
+      }
+      break;
+    }
+
     // ─── Swarm mode ─────────────────────────────────────────────
 
     case '/swarm': {
@@ -1884,11 +1922,13 @@ function printHelp() {
   ${colors.dim('  Example: /auto create a todo app with React and Express')}
 
   ${colors.header('Swarm Mode')}
-  ${colors.toolName('/swarm <task>')}      Use ALL configured providers in parallel
+  ${colors.dim('  (swarm.default is ON by default — plain prompts run through the swarm)')}
+  ${colors.toolName('/swarm <task>')}      Force swarm even when in /solo mode
   ${colors.toolName('/swarm --list')}      Show swarm pool and auto-selected lead
   ${colors.toolName('/swarm --lead <p>')}  Force a specific provider as lead
   ${colors.toolName('/swarm remove <p>')}  Exclude a provider from the pool
   ${colors.toolName('/swarm add <p>')}     Re-include an excluded provider
+  ${colors.toolName('/solo [on|off]')}     Bypass swarm for this session — single provider
   ${colors.dim('  Example: /swarm refactor the auth module')}
 
   ${colors.header('Proxy & Remote Access')}

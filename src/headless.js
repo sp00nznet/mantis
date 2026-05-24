@@ -8,10 +8,11 @@
  * a single JSON object instead. Exit code is 0 on success, 1 on error.
  */
 
-import { loadConfig, PROVIDERS } from './config.js';
+import { loadConfig, getConfig, PROVIDERS } from './config.js';
 import { setWorkingDirectory } from './tools.js';
 import { createAgent } from './agent.js';
 import { initMcp, shutdownMcp } from './mcp.js';
+import { runSwarm, getSwarmPool } from './swarm.js';
 
 /**
  * @param {string} task
@@ -34,6 +35,36 @@ export async function runHeadless(task, opts = {}) {
 
   const agent = createAgent(prefs ? { prefs } : {});
   await initMcp();
+
+  // Swarm routing: --swarm forces, --solo skips, otherwise honour config.swarm.default.
+  const cfg = getConfig();
+  const swarmDefault = !!cfg.swarm?.default;
+  const minPool = cfg.swarm?.minPoolSize ?? 2;
+  const wantSwarm = opts.swarm || (!opts.solo && swarmDefault);
+  if (wantSwarm && getSwarmPool().length >= minPool) {
+    let swarmText = '';
+    const tools = [];
+    const swarm = runSwarm(task, {
+      onStatus: (type, provider, data) => {
+        if (type === 'pool') process.stderr.write(`  [swarm] pool: ${data.pool.join(', ')} | lead: ${data.lead}\n`);
+        else if (type === 'phase') process.stderr.write(`  [swarm] phase ${data || provider}\n`);
+        else if (type === 'error') process.stderr.write(`  [swarm error] ${provider || ''}: ${data}\n`);
+      },
+      onText: (t) => { swarmText += t; if (!json) process.stdout.write(t); },
+      onToolCall: (name) => { tools.push(name); process.stderr.write(`  [tool] ${name}\n`); },
+    });
+    let result;
+    try { result = await swarm.promise; }
+    catch (err) { result = { success: false }; process.stderr.write(`  [swarm fatal] ${err.message}\n`); }
+    shutdownMcp();
+    const ok = !!(result && result.success);
+    if (json) {
+      process.stdout.write(JSON.stringify({ ok, text: swarmText.trim(), toolCalls: tools.length, tools, swarm: true }, null, 2) + '\n');
+    } else {
+      process.stdout.write('\n');
+    }
+    return ok;
+  }
 
   let text = '';
   const toolsUsed = [];

@@ -4,6 +4,16 @@ Swarm mode uses **all your configured providers at once**. One provider leads
 (decomposes the task, writes code), the rest work as parallel read-only
 explorers. Adding a new API key instantly adds that provider to the swarm pool.
 
+> **As of v3.6, swarm is the default** for plain prompts (REPL, `mantis run`,
+> desktop chat-mode and agent-mode). With fewer than `swarm.minPoolSize`
+> configured providers (default 2), Mantis silently falls back to a single
+> agent so single-key users still work. To opt out:
+>
+> - **Desktop Settings → Swarm** → uncheck "Use swarm by default"
+> - **CLI**: `mantis run "task" --solo` (or `--no-swarm`); `--swarm` to force
+> - **REPL**: `/solo on` (per-session); `/solo off` to re-enable; `/solo status`
+> - **Config**: set `swarm.default: false` in `~/.mantis/config.json`
+
 ```bash
 # See what's in your swarm pool
 /swarm --list

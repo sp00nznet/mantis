@@ -1,17 +1,28 @@
 {
   "name": "mantis-code",
-  "version": "3.0.0",
+  "version": "3.6.0",
   "description": "Agentic coding CLI — local or cloud LLMs, autonomous & swarm modes, Anthropic-compatible proxy, chat bots",
   "bin": {
     "mantis": "./bin/mantis.js"
   },
   "scripts": {
-    "start": "node bin/mantis.js"
+    "start": "node bin/mantis.js",
+    "build:sea": "node scripts/build-sea.mjs",
+    "build:installer": "node scripts/build-cli-installer.mjs",
+    "build:all": "npm run build:sea && npm run build:installer",
+    "test": "node --test tests/"
   },
   "dependencies": {
     "chalk": "^5.3.0",
     "ora": "^8.0.1"
   },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "postject": "^1.0.0-alpha.6"
+  },
   "type": "module",
-  "license": "MIT"
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  }
 }

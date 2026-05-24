@@ -315,6 +315,53 @@ ipcMain.handle('config:setKey', (_e, { provider, key }) => {
 
 ipcMain.handle('config:models', (_e, provider) => listModels(provider, currentPrefs()));
 
+ipcMain.handle('config:setSwarmDefault', (_e, on) => {
+  const c = getConfig();
+  saveConfig({ swarm: { ...(c.swarm || {}), default: !!on } });
+  return { ok: true };
+});
+
+ipcMain.handle('config:swarmInfo', async () => {
+  const { getSwarmPool } = await import('../src/swarm.js');
+  const cfg = getConfig();
+  const pool = getSwarmPool();
+  return {
+    default: !!cfg.swarm?.default,
+    minPoolSize: cfg.swarm?.minPoolSize ?? 2,
+    pool: pool.map(p => p.key),
+  };
+});
+
+// ─── Local backend URL overrides (Ollama / LM Studio / llama.cpp) ───
+ipcMain.handle('config:getLocalUrls', () => {
+  const c = getConfig();
+  const prefs = currentPrefs();
+  return {
+    ollamaUrl: (prefs && prefs.ollamaUrl) || c.ollamaUrl || '',
+    localUrls: { ...(c.localUrls || {}), ...((prefs && prefs.localUrls) || {}) },
+  };
+});
+
+ipcMain.handle('config:setLocalUrl', (_e, { provider, url }) => {
+  const u = (url || '').trim();
+  if (provider === 'local') {
+    if (currentUser) users.saveUserPrefs(currentUser.userId, { ollamaUrl: u || 'http://localhost:11434' });
+    else saveConfig({ ollamaUrl: u || 'http://localhost:11434' });
+    return { ok: true };
+  }
+  if (!PROVIDERS[provider]) return { error: 'Unknown provider' };
+  if (currentUser) {
+    const cur = { ...(users.getUserPrefs(currentUser.userId).localUrls || {}) };
+    if (u) cur[provider] = u; else delete cur[provider];
+    users.saveUserPrefs(currentUser.userId, { localUrls: cur });
+  } else {
+    const cur = { ...(getConfig().localUrls || {}) };
+    if (u) cur[provider] = u; else delete cur[provider];
+    saveConfig({ localUrls: cur });
+  }
+  return { ok: true };
+});
+
 // ─── Attachments IPC ────────────────────────────────────────────────
 
 ipcMain.handle('attach:pick', async () => {
