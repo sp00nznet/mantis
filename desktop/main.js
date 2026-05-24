@@ -326,6 +326,19 @@ ipcMain.handle('config:setSwarmDefault', (_e, on) => {
 ipcMain.handle('external:list', () => listExternalAgents());
 ipcMain.handle('external:refresh', () => refreshAvailability());
 
+// Toggle a high-risk agent's enabled flag (aider/gemini/qwen/cline default to
+// disabled because of their auto-everything modes). Writes through to
+// config.externalAgents.<id>.enabled and drops the availability cache so the
+// next listExternalAgents() reflects the change.
+ipcMain.handle('external:setEnabled', (_e, { agentId, enabled }) => {
+  const c = getConfig();
+  const ext = { ...(c.externalAgents || {}) };
+  ext[agentId] = { ...(ext[agentId] || {}), enabled: !!enabled };
+  saveConfig({ externalAgents: ext });
+  refreshAvailability();
+  return { ok: true };
+});
+
 ipcMain.handle('sessions:setAgent', (_e, { sessionId, agentId }) => {
   if (!agentId) return { error: 'agentId required' };
   if (agentId !== 'native' && !resolveAgentSpec(agentId)?.available) {

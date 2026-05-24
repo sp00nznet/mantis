@@ -129,6 +129,13 @@
         <p class="hint">Keys are shared with the Mantis CLI (~/.mantis/config.json).</p>
       </div>
       <div class="card">
+        <h2>External Agents</h2>
+        <p class="hint" style="margin-top:0">Other agentic CLIs Mantis can delegate a turn to. Mantis becomes a passthrough — it doesn't see their tool calls, just the streamed reply. Detected via your <code>PATH</code>.</p>
+        <div id="externalAgentsList" style="margin-top:10px"></div>
+        <button class="ghost" id="refreshExternalAgents" style="margin-top:8px">⟳ Re-scan PATH</button>
+      </div>
+
+      <div class="card">
         <h2>Local backends</h2>
         <p class="hint" style="margin-top:0">URLs for local model servers. Leave blank to use the default. Ollama models appear in the Model dropdown when "Local (Ollama)" is the active provider.</p>
         <label>Ollama URL</label>

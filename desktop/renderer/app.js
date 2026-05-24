@@ -508,6 +508,20 @@ async function initAgentPicker() {
   }
   sel.onchange = async () => {
     if (!CURRENT) return;
+    // Cwd-guard: external agents edit files on disk. Chat-mode sessions
+    // don't have a project folder — Mantis falls back to $HOME, which the
+    // engine then rejects to avoid wrecking the wrong files. Warn upfront
+    // so the user can switch the session into a project rather than getting
+    // a confusing error after they send.
+    if (sel.value !== 'native' && CURRENT_SESSION && CURRENT_SESSION.mode !== 'agent') {
+      const ok = confirm(
+        'This chat is not bound to a project folder.\n\n'
+        + 'External agents need a real project directory to edit files in. '
+        + 'Mantis will refuse to spawn them at your home folder (the cwd guard).\n\n'
+        + 'Switch the agent anyway? Open a project session for the agent to work.'
+      );
+      if (!ok) { syncAgentPicker(CURRENT_SESSION); return; }
+    }
     const r = await M.setSessionAgent(CURRENT, sel.value);
     if (r && r.ok) {
       if (CURRENT_SESSION) CURRENT_SESSION.agent = sel.value;
@@ -527,6 +541,64 @@ function syncAgentPicker(s) {
   // If the saved agent isn't in the dropdown (e.g. uninstalled since), fall back to native.
   if (sel.value !== want) sel.value = 'native';
   sel.classList.toggle('external', sel.value !== 'native');
+}
+
+// ─── External agents settings card ──────────────────────────────────
+function renderExternalAgentsCard() {
+  const box = $('externalAgentsList');
+  if (!box || !AGENTS) return;
+  box.innerHTML = '';
+  for (const a of AGENTS) {
+    if (a.id === 'native') continue;
+    const row = document.createElement('div');
+    row.className = 'agent-row';
+    const left = document.createElement('div');
+    left.className = 'agent-row-left';
+    const status = a.available
+      ? (a.disabled ? '<span class="agent-tag warn">disabled</span>'
+                    : '<span class="agent-tag ok">available</span>')
+      : '<span class="agent-tag dim">not installed</span>';
+    const risk = a.risk === 'high'    ? '<span class="agent-tag warn">⚠ high risk</span>'
+              :  a.risk === 'medium'  ? '<span class="agent-tag">medium risk</span>'
+              :  a.risk === 'unknown' ? '<span class="agent-tag dim">unknown risk</span>' : '';
+    left.innerHTML = '<b>' + escapeHtml(a.name) + '</b> ' + status + ' ' + risk
+                   + '<div class="agent-bin">' + escapeHtml(a.bin || '(not found)') + '</div>';
+    row.appendChild(left);
+    // Toggle is only meaningful for high-risk agents that are installed.
+    // Other rows just show status.
+    if (a.available && a.risk === 'high') {
+      const lbl = document.createElement('label');
+      lbl.className = 'agent-toggle';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !a.disabled;
+      cb.onchange = async () => {
+        if (cb.checked && !confirm(
+          a.name + ' auto-approves every tool call (no confirmation prompts).\n\n'
+          + 'It can modify files, run shell commands, and commit to git without asking.\n\n'
+          + 'Enable it?'
+        )) {
+          cb.checked = false;
+          return;
+        }
+        const r = await M.setExternalAgentEnabled(a.id, cb.checked);
+        if (r && r.ok) {
+          AGENTS = await M.listExternalAgents();
+          renderExternalAgentsCard();
+          await initAgentPicker();
+          syncAgentPicker(CURRENT_SESSION);
+          toast(a.name + (cb.checked ? ' enabled' : ' disabled'));
+        } else {
+          cb.checked = !cb.checked;
+          toast((r && r.error) || 'Failed', true);
+        }
+      };
+      lbl.appendChild(cb);
+      lbl.appendChild(document.createTextNode(' enable'));
+      row.appendChild(lbl);
+    }
+    box.appendChild(row);
+  }
 }
 function setSending(on) {
   sending = on;
@@ -878,6 +950,16 @@ function wire() {
     if (r && r.ok) { toast('API key saved'); renderSettings(); }
     else toast((r && r.error) || 'Failed', true);
   };
+
+  // ── External agents card ──
+  $('refreshExternalAgents').onclick = async () => {
+    AGENTS = await M.refreshExternalAgents();
+    renderExternalAgentsCard();
+    await initAgentPicker();              // refresh composer dropdown too
+    syncAgentPicker(CURRENT_SESSION);
+    toast('Re-scanned PATH');
+  };
+  renderExternalAgentsCard();
 
   // ── Swarm toggle ──
   const sw = await M.swarmInfo();

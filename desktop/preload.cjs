@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld('mantis', {
   // external agents (claude/codex/aider/…)
   listExternalAgents: () => ipcRenderer.invoke('external:list'),
   refreshExternalAgents: () => ipcRenderer.invoke('external:refresh'),
+  setExternalAgentEnabled: (agentId, enabled) => ipcRenderer.invoke('external:setEnabled', { agentId, enabled }),
   setSessionAgent: (sessionId, agentId) => ipcRenderer.invoke('sessions:setAgent', { sessionId, agentId }),
 
   // chat

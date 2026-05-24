@@ -152,6 +152,27 @@ body.has-bg #chatView::before {
   font-size: 10px; color: var(--dimmer); margin-top: 4px; padding: 0 2px;
 }
 
+/* External agents settings card — per-agent row */
+.agent-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 0; border-bottom: 1px solid var(--border);
+}
+.agent-row:last-child { border-bottom: none; }
+.agent-row-left { flex: 1; min-width: 0; }
+.agent-bin { color: var(--dimmer); font-size: 10px; margin-top: 3px; font-family: monospace; word-break: break-all; }
+.agent-tag {
+  display: inline-block; font-size: 9px; padding: 1px 6px; border-radius: 8px;
+  background: var(--surface-hi); color: var(--dim); margin-left: 4px; vertical-align: middle;
+}
+.agent-tag.ok   { background: color-mix(in srgb, var(--accent2) 24%, transparent); color: var(--accent2); }
+.agent-tag.warn { background: color-mix(in srgb, var(--danger) 24%, transparent); color: var(--danger); }
+.agent-tag.dim  { background: transparent; color: var(--dimmer); border: 1px solid var(--border); }
+.agent-toggle {
+  display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 12px;
+  cursor: pointer; margin-left: 12px; white-space: nowrap;
+}
+.agent-toggle input { width: auto; }
+
 /* composer attachments */
 .composer-attach {
   border: 1px solid var(--border-hi); background: var(--surface); color: var(--dim);
