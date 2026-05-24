@@ -21,6 +21,7 @@ Guides for using and understanding Mantis. New here? Start with
 - [Chat Bots](bots.md) — drive Mantis from Telegram or Discord
 - [Plan Mode](plan-mode.md) — read-only exploration
 - [Skills](skills.md) — built-in and custom slash commands
+- [External Agents](multi-agent.md) — delegate to Claude Code / Codex / Aider / …
 - [Memory](memory.md) — persistent cross-session memory
 - [Context Management](context-management.md) — how long sessions survive
 

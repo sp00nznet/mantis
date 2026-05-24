@@ -43,10 +43,13 @@ variables:
   NPM_CONFIG_AUDIT: "false"
   npm_config_cache: "$CI_PROJECT_DIR/.npm"
   # electron-builder downloads its electron + nsis binaries from this mirror.
-  # GitHub releases works for most networks; override per-runner if a proxy
-  # is needed.
+  # The Debian runner can't reach GitHub releases reliably (hung for 11+ min on
+  # electron-v33.4.11-linux-x64.zip), so we point at npmmirror's CDN which
+  # mirrors every release. macOS/Windows runners are fine either way.
   ELECTRON_BUILDER_CACHE: "$CI_PROJECT_DIR/.cache/electron-builder"
   ELECTRON_CACHE: "$CI_PROJECT_DIR/.cache/electron"
+  ELECTRON_MIRROR: "https://registry.npmmirror.com/-/binary/electron/"
+  ELECTRON_BUILDER_BINARIES_MIRROR: "https://registry.npmmirror.com/-/binary/electron-builder-binaries/"
 
 # Run on MR pipelines (build + package, but skip deploy via rules below) and on
 # branch pipelines (push to main/master). Tags also trigger.
