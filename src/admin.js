@@ -358,8 +358,16 @@ async function handleSessionApi(req, res, parts) {
   if (action === 'input' && req.method === 'POST') {
     const body = await readJson(req, 12 * 1024 * 1024); // allow image data URLs
     if (!body.text) return sendJson(res, 400, { error: 'text is required' });
-    sendInput(id, String(body.text), Array.isArray(body.images) ? body.images : undefined);
+    sendInput(id, String(body.text), Array.isArray(body.images) ? body.images : undefined,
+              body.agent ? String(body.agent) : undefined);
     return sendJson(res, 200, { ok: true });
+  }
+  if (action === 'agent' && req.method === 'POST') {
+    const body = await readJson(req);
+    const agentId = body.agentId ? String(body.agentId) : '';
+    if (!agentId) return sendJson(res, 400, { error: 'agentId is required' });
+    session.agent = agentId;
+    return sendJson(res, 200, { ok: true, agent: agentId });
   }
   if (action === 'stop' && req.method === 'POST') {
     stopSession(id);
@@ -477,6 +485,16 @@ async function handleApi(req, res, url) {
 
   if (parts[1] === 'sessions') return handleSessionApi(req, res, parts);
   if (parts[1] === 'users') return handleUsersApi(req, res, parts);
+
+  // External agents (claude/codex/aider/…) — list which CLIs are installed.
+  if (url === '/api/external-agents' && req.method === 'GET') {
+    const { listExternalAgents } = await import('./external-agents.js');
+    return sendJson(res, 200, listExternalAgents());
+  }
+  if (url === '/api/external-agents/refresh' && req.method === 'POST') {
+    const { refreshAvailability } = await import('./external-agents.js');
+    return sendJson(res, 200, refreshAvailability());
+  }
 
   // ── Sign-in setup ──
 

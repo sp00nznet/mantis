@@ -197,10 +197,13 @@ export function removeSession(id) {
   return true;
 }
 
-export function sendInput(id, text, images) {
+export function sendInput(id, text, images, agentId) {
   const session = _sessions.get(id);
   if (!session || !session.driver?.input) return false;
-  session.driver.input(text, images);
+  // agentId is a per-turn override (admin web UI dropdown). The driver
+  // decides whether to honour it; web sessions thread it into runWeb so the
+  // external-agents path picks it up.
+  session.driver.input(text, images, agentId);
   return true;
 }
 

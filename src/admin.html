@@ -731,6 +731,11 @@ function loadState() {
       hideLogin();
       STATE = s;
       applyTheme(findTheme(s.theme));
+      // Fire-and-forget: populate the external-agents list for the per-session
+      // dropdown. Cached in STATE so buildTerminal can use it synchronously.
+      api('GET', '/api/external-agents').then(function(list){
+        STATE.externalAgents = Array.isArray(list) ? list : [];
+      }).catch(function(){ STATE.externalAgents = []; });
       renderConfig();
       renderUserChip();
       applyRole();
@@ -1165,6 +1170,29 @@ function buildTerminal(s, mini) {
       fileInput.value = '';
     };
     var ta = el('textarea', { placeholder: 'Message this session — Enter to send, Shift+Enter for newline' });
+    // Agent picker — overrides session default for this single message.
+    var agentSel = el('select', { class: 'agent-pick', title: 'Which agent answers this turn' });
+    agentSel.style.cssText = 'font-size:11px;padding:0 6px;height:34px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--dim);max-width:160px';
+    function populateAgents() {
+      agentSel.innerHTML = '';
+      var opts = (STATE.externalAgents || [{ id:'native', name:'Mantis (native)', available:true }]);
+      var current = s.agent || 'native';
+      opts.forEach(function(a){
+        if (!a.available && a.id !== 'native') return;
+        var o = document.createElement('option');
+        o.value = a.id;
+        o.textContent = a.name + (a.id !== 'native' ? '  · external' : '');
+        if (a.id === current) o.selected = true;
+        agentSel.appendChild(o);
+      });
+    }
+    populateAgents();
+    agentSel.onchange = function() {
+      // Persist the session-level default. fire() also includes it in /input
+      // for the cases where the user just sent before this change took effect.
+      api('POST', '/api/sessions/' + s.id + '/agent', { agentId: agentSel.value });
+      s.agent = agentSel.value;
+    };
     var send = el('button', null, 'Send');
     function fire() {
       var v = ta.value.trim();
@@ -1176,7 +1204,7 @@ function buildTerminal(s, mini) {
       });
       var msg = blocks.length ? (v ? v + '\n\n' : '') + blocks.join('\n\n') : v;
       if (!msg) msg = '(see the attached image)';
-      api('POST','/api/sessions/'+s.id+'/input', { text: msg, images: images });
+      api('POST','/api/sessions/'+s.id+'/input', { text: msg, images: images, agent: agentSel.value });
       ta.value = '';
       attached = [];
       refreshChip();
@@ -1184,7 +1212,7 @@ function buildTerminal(s, mini) {
     send.onclick = fire;
     ta.onkeydown = function(e){ if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fire(); } };
     ir.appendChild(clip); ir.appendChild(fileInput);
-    ir.appendChild(ta); ir.appendChild(chip); ir.appendChild(send);
+    ir.appendChild(ta); ir.appendChild(chip); ir.appendChild(agentSel); ir.appendChild(send);
     wrap.appendChild(ir);
   }
 
