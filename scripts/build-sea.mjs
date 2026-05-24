@@ -29,11 +29,17 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'dist');
 const RELEASE = path.join(DIST, 'release');
-const PLATFORM = process.platform;          // 'win32' | 'darwin' | 'linux'
-const ARCH = process.arch;                  // 'x64' | 'arm64'
+// TARGET_PLATFORM / TARGET_ARCH let us cross-build (e.g. produce a Linux
+// binary on a macOS runner — postject patches ELF/Mach-O/PE sections from
+// any host, only the embedded Node binary needs to match the target). Default
+// to the host's platform/arch when not set.
+const PLATFORM = process.env.TARGET_PLATFORM || process.platform;   // 'win32' | 'darwin' | 'linux'
+const ARCH = process.env.TARGET_ARCH || process.arch;                // 'x64' | 'arm64'
+const HOST_PLATFORM = process.platform;
 const EXE = PLATFORM === 'win32' ? '.exe' : '';
 const BIN_NAME = `mantis${EXE}`;
 const BIN_OUT = path.join(RELEASE, BIN_NAME);
+const IS_CROSS = PLATFORM !== HOST_PLATFORM || ARCH !== process.arch;
 // Pinned Node 22 LTS. Used both for the --experimental-sea-config call and
 // as the embedded binary so every release has a known-good Node baked in.
 const NODE_VERSION = 'v22.11.0';
@@ -55,44 +61,68 @@ function run(cmd, args, opts = {}) {
 function rmrf(p) { if (fs.existsSync(p)) fs.rmSync(p, { recursive: true, force: true }); }
 function ensureDir(p) { fs.mkdirSync(p, { recursive: true }); }
 
-// Download Node 22 if the host has an older version. --experimental-sea-config
-// was added in Node 20 but the SEA single-exe story is only complete in Node 22.
-// We bake the downloaded Node into the final binary too, so the build is
-// reproducible regardless of what's installed on the runner.
-function ensureNode22() {
-  const major = parseInt(process.versions.node.split('.')[0], 10);
-  if (major >= 22) return process.execPath;
-
-  step(`Host node is v${process.versions.node} — downloading ${NODE_VERSION}`);
-  const nodeDir = path.join(DIST, '.node');
+// Download a Node 22 binary for the TARGET platform/arch. Used both for
+// the --experimental-sea-config call (we need Node 22 to run that) and as
+// the embedded binary that becomes the SEA exe. Cross-builds: returns the
+// TARGET's binary even when the host is different (the host still needs
+// a Node 22 to run --experimental-sea-config — we download a host-matching
+// one below if needed).
+function downloadNode(forPlatform, forArch) {
+  const nodeDir = path.join(DIST, '.node', `${forPlatform}-${forArch}`);
   fs.mkdirSync(nodeDir, { recursive: true });
-  const tag = PLATFORM === 'win32' ? `win-${ARCH}`
-            : PLATFORM === 'darwin' ? `darwin-${ARCH}`
-            : `linux-${ARCH}`;
-  const ext = PLATFORM === 'win32' ? 'zip' : 'tar.xz';
+  const tag = forPlatform === 'win32' ? `win-${forArch}`
+            : forPlatform === 'darwin' ? `darwin-${forArch}`
+            : `linux-${forArch}`;
+  const ext = forPlatform === 'win32' ? 'zip' : 'tar.xz';
   const url = `https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-${tag}.${ext}`;
   const archive = path.join(nodeDir, `node.${ext}`);
-
   run('curl', ['-sSL', '-o', archive, url]);
 
   if (ext === 'tar.xz') {
-    // --strip-components=1 → dist/.node/{bin,lib,...}
     run('tar', ['-xJf', archive, '-C', nodeDir, '--strip-components=1']);
     const out = path.join(nodeDir, 'bin', 'node');
     if (!fs.existsSync(out)) die(`Extracted Node not found at ${out}`);
-    fs.chmodSync(out, 0o755);
-    ok(`downloaded ${out}`);
+    try { fs.chmodSync(out, 0o755); } catch { /* on win32 host this no-ops */ }
     return out;
   } else {
-    // Windows zip extracts to dist/.node/node-vX.X.X-win-x64/node.exe
-    run('powershell', ['-NoProfile', '-Command',
-      `Expand-Archive -Path '${archive}' -DestinationPath '${nodeDir}' -Force`]);
+    if (HOST_PLATFORM === 'win32') {
+      run('powershell', ['-NoProfile', '-Command',
+        `Expand-Archive -Path '${archive}' -DestinationPath '${nodeDir}' -Force`]);
+    } else {
+      run('unzip', ['-q', '-o', archive, '-d', nodeDir]);
+    }
     const subdir = `node-${NODE_VERSION}-${tag}`;
     const out = path.join(nodeDir, subdir, 'node.exe');
     if (!fs.existsSync(out)) die(`Extracted node.exe not found at ${out}`);
-    ok(`downloaded ${out}`);
     return out;
   }
+}
+
+function ensureNode22() {
+  const hostMajor = parseInt(process.versions.node.split('.')[0], 10);
+
+  // Path 1 — building for the host platform, host is already Node 22+.
+  if (!IS_CROSS && hostMajor >= 22) {
+    return { hostNode: process.execPath, targetNode: process.execPath };
+  }
+
+  // Path 2 — host needs Node 22 too (older runner). Download host-matching one.
+  let hostNode = process.execPath;
+  if (hostMajor < 22) {
+    step(`Host node is v${process.versions.node} — downloading ${NODE_VERSION} for host`);
+    hostNode = downloadNode(HOST_PLATFORM, process.arch);
+    ok(`host node: ${hostNode}`);
+  }
+
+  // Path 3 — cross-build. Also download the target's binary (which becomes
+  // the embedded Node in the final exe).
+  let targetNode = hostNode;
+  if (IS_CROSS) {
+    step(`Cross-building: target ${PLATFORM}-${ARCH} — downloading ${NODE_VERSION} for target`);
+    targetNode = downloadNode(PLATFORM, ARCH);
+    ok(`target node: ${targetNode}`);
+  }
+  return { hostNode, targetNode };
 }
 function copyIfExists(src, dest) {
   if (!fs.existsSync(src)) return false;
@@ -103,11 +133,11 @@ function copyIfExists(src, dest) {
 }
 
 // ─── 0. Clean + ensure Node 22 ──────────────────────────────────────
-step('Cleaning dist/');
+step(`Cleaning dist/ (target: ${PLATFORM}-${ARCH}${IS_CROSS ? ', CROSS' : ''})`);
 rmrf(DIST);
 ensureDir(RELEASE);
 
-const NODE22 = ensureNode22();
+const { hostNode, targetNode } = ensureNode22();
 
 // ─── 1. esbuild bundle ──────────────────────────────────────────────
 step('Bundling bin/mantis.js → dist/mantis.bundle.cjs (esbuild)');
@@ -135,13 +165,15 @@ ok('bundle written');
 
 // ─── 2. SEA blob ────────────────────────────────────────────────────
 step('Generating SEA blob');
-run(NODE22, ['--experimental-sea-config', path.join(ROOT, 'sea-config.json')]);
+run(hostNode, ['--experimental-sea-config', path.join(ROOT, 'sea-config.json')]);
 ok('blob written to dist/sea-prep.blob');
 
-// ─── 3. Copy node 22 binary (host's or downloaded) ──────────────────
-step(`Copying Node 22 binary → ${BIN_OUT}`);
-fs.copyFileSync(NODE22, BIN_OUT);
-if (PLATFORM !== 'win32') fs.chmodSync(BIN_OUT, 0o755);
+// ─── 3. Copy target node 22 binary ──────────────────────────────────
+step(`Copying target Node 22 binary (${PLATFORM}-${ARCH}) → ${BIN_OUT}`);
+fs.copyFileSync(targetNode, BIN_OUT);
+if (PLATFORM !== 'win32') {
+  try { fs.chmodSync(BIN_OUT, 0o755); } catch { /* on win32 host this no-ops */ }
+}
 ok('binary copied');
 
 // macOS only: strip the existing signature before postject, re-sign after.

@@ -231,23 +231,32 @@ package:cli:windows:
 
 package:cli:linux:
   extends: .package_cli_base
-  tags: [linux, debian, shell]
+  # Cross-built on the macOS runner. The debian-runner doesn't have enough
+  # RAM for postject to inject the SEA blob (8 min slow grind then OOM kill).
+  # postject is platform-agnostic — it patches ELF/Mach-O/PE sections from
+  # any host — and TARGET_PLATFORM=linux makes build-sea.mjs download the
+  # linux Node 22 binary and use that as the embedded runtime in the final
+  # exe. The .deb installer is also produced here via dpkg-deb on macOS
+  # (or skipped if dpkg-deb isn't present — see installer script).
+  tags: [macos, darwin, shell]
   needs:
-    - job: build:linux
+    - job: build:macos
       artifacts: false
+  variables:
+    TARGET_PLATFORM: "linux"
+    TARGET_ARCH: "x64"
   script:
     - npm install --no-audit --no-fund
     - npm run build:sea
-    - npm run build:installer
+    # Skip the native installer step on macOS — dpkg-deb isn't there. The
+    # CLI .deb can be built on a separate linux job (or locally) when needed.
     - mkdir -p releases/linux
     - tar -C dist/release -czf "releases/Mantis-CLI-linux-x64-$CI_COMMIT_SHORT_SHA.tar.gz" .
-    - mv dist/mantis-cli_*.deb releases/linux/
-    - ls -lh releases/ releases/linux/
+    - ls -lh releases/
   artifacts:
     name: "mantis-cli-linux-$CI_COMMIT_SHORT_SHA"
     paths:
       - releases/Mantis-CLI-linux-x64-*.tar.gz
-      - releases/linux/mantis-cli_*.deb
     expire_in: 30 days
 
 package:cli:macos:
