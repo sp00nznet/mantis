@@ -350,6 +350,11 @@ package:desktop:macos:
 deploy:
   stage: deploy
   tags: [windows, win10, shell]
+  # `package:desktop:linux` is marked optional because the debian-runner's
+  # restricted egress means it routinely hangs until the bootstrap pipeline
+  # has been played to seed ~/.cache/electron. Once the cache is populated
+  # this dependency becomes a non-issue, but until then deploy should still
+  # land everything else on the SMB share.
   needs:
     - job: package:cli:windows
       artifacts: true
@@ -361,6 +366,7 @@ deploy:
       artifacts: true
     - job: package:desktop:linux
       artifacts: true
+      optional: true
     - job: package:desktop:macos
       artifacts: true
   variables:
