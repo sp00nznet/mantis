@@ -30,9 +30,13 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'dist');
 const RELEASE = path.join(DIST, 'release');
 const PLATFORM = process.platform;          // 'win32' | 'darwin' | 'linux'
+const ARCH = process.arch;                  // 'x64' | 'arm64'
 const EXE = PLATFORM === 'win32' ? '.exe' : '';
 const BIN_NAME = `mantis${EXE}`;
 const BIN_OUT = path.join(RELEASE, BIN_NAME);
+// Pinned Node 22 LTS. Used both for the --experimental-sea-config call and
+// as the embedded binary so every release has a known-good Node baked in.
+const NODE_VERSION = 'v22.11.0';
 
 function step(msg) { console.log(`\n▶ ${msg}`); }
 function ok(msg)   { console.log(`  ✓ ${msg}`); }
@@ -50,6 +54,46 @@ function run(cmd, args, opts = {}) {
 
 function rmrf(p) { if (fs.existsSync(p)) fs.rmSync(p, { recursive: true, force: true }); }
 function ensureDir(p) { fs.mkdirSync(p, { recursive: true }); }
+
+// Download Node 22 if the host has an older version. --experimental-sea-config
+// was added in Node 20 but the SEA single-exe story is only complete in Node 22.
+// We bake the downloaded Node into the final binary too, so the build is
+// reproducible regardless of what's installed on the runner.
+function ensureNode22() {
+  const major = parseInt(process.versions.node.split('.')[0], 10);
+  if (major >= 22) return process.execPath;
+
+  step(`Host node is v${process.versions.node} — downloading ${NODE_VERSION}`);
+  const nodeDir = path.join(DIST, '.node');
+  fs.mkdirSync(nodeDir, { recursive: true });
+  const tag = PLATFORM === 'win32' ? `win-${ARCH}`
+            : PLATFORM === 'darwin' ? `darwin-${ARCH}`
+            : `linux-${ARCH}`;
+  const ext = PLATFORM === 'win32' ? 'zip' : 'tar.xz';
+  const url = `https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-${tag}.${ext}`;
+  const archive = path.join(nodeDir, `node.${ext}`);
+
+  run('curl', ['-sSL', '-o', archive, url]);
+
+  if (ext === 'tar.xz') {
+    // --strip-components=1 → dist/.node/{bin,lib,...}
+    run('tar', ['-xJf', archive, '-C', nodeDir, '--strip-components=1']);
+    const out = path.join(nodeDir, 'bin', 'node');
+    if (!fs.existsSync(out)) die(`Extracted Node not found at ${out}`);
+    fs.chmodSync(out, 0o755);
+    ok(`downloaded ${out}`);
+    return out;
+  } else {
+    // Windows zip extracts to dist/.node/node-vX.X.X-win-x64/node.exe
+    run('powershell', ['-NoProfile', '-Command',
+      `Expand-Archive -Path '${archive}' -DestinationPath '${nodeDir}' -Force`]);
+    const subdir = `node-${NODE_VERSION}-${tag}`;
+    const out = path.join(nodeDir, subdir, 'node.exe');
+    if (!fs.existsSync(out)) die(`Extracted node.exe not found at ${out}`);
+    ok(`downloaded ${out}`);
+    return out;
+  }
+}
 function copyIfExists(src, dest) {
   if (!fs.existsSync(src)) return false;
   const stat = fs.statSync(src);
@@ -58,10 +102,12 @@ function copyIfExists(src, dest) {
   return true;
 }
 
-// ─── 0. Clean ───────────────────────────────────────────────────────
+// ─── 0. Clean + ensure Node 22 ──────────────────────────────────────
 step('Cleaning dist/');
 rmrf(DIST);
 ensureDir(RELEASE);
+
+const NODE22 = ensureNode22();
 
 // ─── 1. esbuild bundle ──────────────────────────────────────────────
 step('Bundling bin/mantis.js → dist/mantis.bundle.cjs (esbuild)');
@@ -89,12 +135,12 @@ ok('bundle written');
 
 // ─── 2. SEA blob ────────────────────────────────────────────────────
 step('Generating SEA blob');
-run(process.execPath, ['--experimental-sea-config', path.join(ROOT, 'sea-config.json')]);
+run(NODE22, ['--experimental-sea-config', path.join(ROOT, 'sea-config.json')]);
 ok('blob written to dist/sea-prep.blob');
 
-// ─── 3. Copy host node binary ───────────────────────────────────────
-step(`Copying host node binary → ${BIN_OUT}`);
-fs.copyFileSync(process.execPath, BIN_OUT);
+// ─── 3. Copy node 22 binary (host's or downloaded) ──────────────────
+step(`Copying Node 22 binary → ${BIN_OUT}`);
+fs.copyFileSync(NODE22, BIN_OUT);
 if (PLATFORM !== 'win32') fs.chmodSync(BIN_OUT, 0o755);
 ok('binary copied');
 
