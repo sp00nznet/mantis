@@ -42,6 +42,11 @@ variables:
   NPM_CONFIG_FUND: "false"
   NPM_CONFIG_AUDIT: "false"
   npm_config_cache: "$CI_PROJECT_DIR/.npm"
+  # electron-builder downloads its electron + nsis binaries from this mirror.
+  # GitHub releases works for most networks; override per-runner if a proxy
+  # is needed.
+  ELECTRON_BUILDER_CACHE: "$CI_PROJECT_DIR/.cache/electron-builder"
+  ELECTRON_CACHE: "$CI_PROJECT_DIR/.cache/electron"
 
 # Run on MR pipelines (build + package, but skip deploy via rules below) and on
 # branch pipelines (push to main/master). Tags also trigger.
@@ -66,11 +71,14 @@ workflow:
 .build_base:
   stage: build
   <<: *npm_cache
+  # Build stage just verifies the root tree resolves. Desktop's npm install
+  # triggers a 100 MB Electron binary download which we'd otherwise pay for
+  # twice (here + in package); defer it to the package:desktop:* jobs.
+  variables:
+    ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
   script:
     - node --version
     - npm --version
-    - npm install --no-audit --no-fund
-    - cd desktop
     - npm install --no-audit --no-fund
 
 build:windows:
