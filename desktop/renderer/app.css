@@ -137,6 +137,21 @@ body.has-bg #chatView::before {
 #sendBtn.stop { background: var(--surface-hi); border-color: var(--danger);
   color: var(--danger); filter: none; }
 
+/* agent picker — which agentic CLI answers each turn (native | claude | …) */
+.agent-pick {
+  background: var(--surface); border: 1px solid var(--border-hi); border-radius: 10px;
+  color: var(--dim); font: inherit; font-size: 12px; padding: 0 10px; height: 40px;
+  max-width: 150px; cursor: pointer;
+}
+.agent-pick:focus { outline: none; border-color: var(--accent2); }
+.agent-pick:hover { color: var(--text); }
+.agent-pick.external { border-color: var(--accent2); color: var(--accent2); }
+
+/* per-message footer showing which external agent answered ("via Claude Code · 12.4s") */
+.bubble-footer {
+  font-size: 10px; color: var(--dimmer); margin-top: 4px; padding: 0 2px;
+}
+
 /* composer attachments */
 .composer-attach {
   border: 1px solid var(--border-hi); background: var(--surface); color: var(--dim);

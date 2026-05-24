@@ -389,6 +389,7 @@ async function openSession(id) {
   $('chatProvider').textContent = providerLabel();
   $('chatFilesBtn').classList.toggle('hidden', s.mode !== 'agent');
   $('chatGitBtn').classList.toggle('hidden', s.mode !== 'agent');
+  syncAgentPicker(s);
   renderMessages(s.messages || []);
   show('chatView');
   scrollDown();
@@ -401,7 +402,10 @@ function renderMessages(messages) {
     if (m.role === 'user') {
       addMessage('user', m.content || '');
     } else if (m.role === 'assistant') {
-      if (m.content) addMessage('assistant', m.content);
+      if (m.content) {
+        const bubble = addMessage('assistant', m.content);
+        if (m.meta && m.meta.externalAgent) addAgentFooter(bubble, m.meta);
+      }
       if (Array.isArray(m.tool_calls)) {
         for (const tc of m.tool_calls) {
           let args = {};
@@ -444,6 +448,14 @@ function addMessage(role, content) {
   $('messages').appendChild(wrap);
   return bubble;
 }
+function addAgentFooter(bubble, meta) {
+  const f = document.createElement('div');
+  f.className = 'bubble-footer';
+  const dur = meta.durationMs ? ((meta.durationMs / 1000).toFixed(1) + 's') : '';
+  const name = meta.agentName || meta.externalAgent;
+  f.textContent = 'via ' + name + (dur ? ' · ' + dur : '') + (meta.error ? ' · ' + meta.error : '');
+  bubble.parentElement.appendChild(f);
+}
 function addToolCall(name, args) {
   const el = document.createElement('div');
   el.className = 'toolcall';
@@ -479,6 +491,42 @@ function providerLabel() {
   if (!CONFIG) return '—';
   const p = CONFIG.providers.find(x => x.key === CONFIG.provider);
   return (p ? p.name : CONFIG.provider) + ' · ' + (CONFIG.model || '');
+}
+
+// ─── Agent picker (native vs claude/codex/aider/…) ───────────────────
+let AGENTS = null;
+async function initAgentPicker() {
+  AGENTS = await M.listExternalAgents();
+  const sel = $('agentPicker');
+  sel.innerHTML = '';
+  for (const a of AGENTS) {
+    if (!a.available && a.id !== 'native') continue;
+    const o = document.createElement('option');
+    o.value = a.id;
+    o.textContent = a.name + (a.id !== 'native' ? '  · external' : '');
+    sel.appendChild(o);
+  }
+  sel.onchange = async () => {
+    if (!CURRENT) return;
+    const r = await M.setSessionAgent(CURRENT, sel.value);
+    if (r && r.ok) {
+      if (CURRENT_SESSION) CURRENT_SESSION.agent = sel.value;
+      sel.classList.toggle('external', sel.value !== 'native');
+      toast((sel.value === 'native' ? 'Mantis' : (AGENTS.find(a => a.id === sel.value) || {}).name) + ' will answer this chat');
+    } else {
+      toast((r && r.error) || 'Failed', true);
+      syncAgentPicker(CURRENT_SESSION);
+    }
+  };
+}
+function syncAgentPicker(s) {
+  const sel = $('agentPicker');
+  if (!sel) return;
+  const want = (s && s.agent) || 'native';
+  sel.value = want;
+  // If the saved agent isn't in the dropdown (e.g. uninstalled since), fall back to native.
+  if (sel.value !== want) sel.value = 'native';
+  sel.classList.toggle('external', sel.value !== 'native');
 }
 function setSending(on) {
   sending = on;
@@ -780,6 +828,9 @@ function wire() {
   $('chatProvider').onclick = () => selectSection('settings');
   $('chatFilesBtn').onclick = openFiles;
   $('filesBack').onclick = () => show('chatView');
+
+  // Agent picker — populate from external-agents registry; change → persist per session.
+  initAgentPicker();
   $('listTitle').onclick = () => {
     if (SECTION === 'projects' && CURRENT_PROJECT) {
       CURRENT_PROJECT = null; CURRENT = null; CURRENT_SESSION = null;

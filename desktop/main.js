@@ -19,6 +19,7 @@ import * as store from './store.js';
 import * as projects from './projects.js';
 import * as git from './git.js';
 import { runChatTurn, runAgentTurn, listModels } from './chat.js';
+import { listExternalAgents, refreshAvailability, resolveAgentSpec } from '../src/external-agents.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -318,6 +319,22 @@ ipcMain.handle('config:models', (_e, provider) => listModels(provider, currentPr
 ipcMain.handle('config:setSwarmDefault', (_e, on) => {
   const c = getConfig();
   saveConfig({ swarm: { ...(c.swarm || {}), default: !!on } });
+  return { ok: true };
+});
+
+// ─── External agents (claude/codex/aider/…) ─────────────────────────
+ipcMain.handle('external:list', () => listExternalAgents());
+ipcMain.handle('external:refresh', () => refreshAvailability());
+
+ipcMain.handle('sessions:setAgent', (_e, { sessionId, agentId }) => {
+  if (!agentId) return { error: 'agentId required' };
+  if (agentId !== 'native' && !resolveAgentSpec(agentId)?.available) {
+    return { error: `Agent "${agentId}" is not installed.` };
+  }
+  const s = store.get(sessionId);
+  if (!s) return { error: 'unknown session' };
+  s.agent = agentId;
+  store.save(s);
   return { ok: true };
 });
 

@@ -54,6 +54,11 @@ contextBridge.exposeInMainWorld('mantis', {
   setSwarmDefault: (on) => ipcRenderer.invoke('config:setSwarmDefault', on),
   swarmInfo: () => ipcRenderer.invoke('config:swarmInfo'),
 
+  // external agents (claude/codex/aider/…)
+  listExternalAgents: () => ipcRenderer.invoke('external:list'),
+  refreshExternalAgents: () => ipcRenderer.invoke('external:refresh'),
+  setSessionAgent: (sessionId, agentId) => ipcRenderer.invoke('sessions:setAgent', { sessionId, agentId }),
+
   // chat
   sendMessage: (sessionId, text, images) => ipcRenderer.invoke('chat:send', { sessionId, text, images }),
   stopMessage: (sessionId) => ipcRenderer.invoke('chat:stop', sessionId),
