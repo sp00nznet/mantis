@@ -11,6 +11,8 @@ import { getConfig, PROVIDERS, buildConnection } from '../src/config.js';
 import { setWorkingDirectory } from '../src/tools.js';
 import { buildChatPrompt } from '../src/prompt.js';
 import { runSwarm, getSwarmPool } from '../src/swarm.js';
+import { runExternalAgent, resolveAgentSpec } from '../src/external-agents.js';
+import os from 'os';
 
 function shouldSwarm(prefs, sessionSolo) {
   if (sessionSolo) return false;
@@ -18,6 +20,47 @@ function shouldSwarm(prefs, sessionSolo) {
   if (!cfg.swarm?.default) return false;
   const minPool = cfg.swarm?.minPoolSize ?? 2;
   return getSwarmPool().length >= minPool;
+}
+
+/**
+ * Run one turn through an external agentic CLI (claude / codex / aider / …).
+ * Returns when the subprocess exits. Streams stdout into cb.onText; appends a
+ * synthetic assistant message with meta.externalAgent so the renderer can show
+ * a "via Claude Code" footer.
+ */
+async function runExternalAgentTurn(agentId, session, cwd, text, cb, ctl) {
+  const spec = resolveAgentSpec(agentId);
+  if (!spec || !spec.available) {
+    cb.onError && cb.onError(`External agent "${agentId}" is not available.`);
+    return;
+  }
+  let streamedText = '';
+  const handle = runExternalAgent(agentId, text, {
+    cwd,
+    onText: (t) => {
+      streamedText += t;
+      cb.onText && cb.onText(t);
+    },
+    onError: (err) => { cb.onError && cb.onError(err); },
+  });
+  if (ctl) ctl.externalCancel = handle.cancel;
+  const result = await handle.promise;
+  // Persist the turn. External agents don't expose tool calls; one assistant
+  // message with a meta block is the whole story.
+  session.messages = session.messages || [];
+  session.messages.push({ role: 'user', content: text });
+  session.messages.push({
+    role: 'assistant',
+    content: streamedText,
+    meta: {
+      externalAgent: agentId,
+      agentName: spec.name,
+      exitCode: result.exitCode,
+      durationMs: result.durationMs,
+      error: result.ok ? undefined : result.error,
+    },
+  });
+  if (!result.ok && cb.onError) cb.onError(`[${spec.name}] ${result.error}`);
 }
 
 async function runSwarmTurn(task, cb, ctl) {
@@ -91,6 +134,13 @@ export async function runChatTurn(session, { onText, onError, onThinking }, isCa
  */
 export async function runAgentTurn(session, project, text, cb, ctl, prefs, images) {
   setWorkingDirectory(project.path);
+
+  // External agent override (claude/codex/aider/…) — takes precedence over
+  // swarm. Per-turn override (ctl.agentOverride) wins over session default.
+  const agentId = (ctl && ctl.agentOverride) || session.agent || 'native';
+  if (agentId !== 'native') {
+    return runExternalAgentTurn(agentId, session, project.path, text, cb, ctl);
+  }
 
   // Swarm-by-default: route through the swarm orchestrator unless the session
   // is in solo mode or the pool is too small (silent fallback to single agent).
