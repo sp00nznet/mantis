@@ -77,7 +77,7 @@
     },
     "dmg": {
       "writeUpdateInfo": false,
-      "format": "ULMO"
+      "format": "ULFO"
     },
     "linux": {
       "icon": "assets/icon.png",

@@ -8,6 +8,7 @@ Guides for using and understanding Mantis. New here? Start with
 
 - [Getting Started](getting-started.md) — install, first session, troubleshooting
 - [Providers](providers.md) — all 23 providers, base URLs, default models, keys
+- [Free Providers](free-providers.md) — every provider with a free tier, signup links, what you need
 - [Configuration](configuration.md) — `~/.mantis/config.json` reference
 
 ## Modes & features
