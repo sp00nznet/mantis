@@ -103,10 +103,13 @@ workflow:
 bootstrap:prepare-electron-cache:
   stage: bootstrap
   tags: [macos, darwin, shell]
+  # Only exists in web-triggered pipelines. On push/MR pipelines this job is
+  # not created, so the `bootstrap` stage is empty and the regular build →
+  # test → package → deploy flow starts immediately.
   rules:
     - if: $CI_PIPELINE_SOURCE == "web"
       when: manual
-    - when: manual
+    - when: never
   needs: []
   script:
     - bash scripts/runner-electron-cache.sh prepare
@@ -123,7 +126,7 @@ bootstrap:install-electron-cache:
   rules:
     - if: $CI_PIPELINE_SOURCE == "web"
       when: manual
-    - when: manual
+    - when: never
   needs:
     - job: bootstrap:prepare-electron-cache
       artifacts: true
