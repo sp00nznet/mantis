@@ -304,6 +304,14 @@ package:desktop:linux:
   needs:
     - job: build:linux
       artifacts: false
+  # Manual until the bootstrap pipeline has been played to seed
+  # ~/.cache/electron on the debian-runner. Without that cache, this job
+  # hangs forever on electron's GitHub download and starves
+  # package:cli:linux of RAM (postject OOMs). Run on-demand once you've
+  # confirmed the cache is there.
+  rules:
+    - when: manual
+      allow_failure: true
   script:
     - cd desktop
     - npm install --no-audit --no-fund
