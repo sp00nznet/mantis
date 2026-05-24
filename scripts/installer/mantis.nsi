@@ -23,6 +23,7 @@ SetCompressor /SOLID lzma
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
+!include "WordFunc.nsh"   ; provides ${WordFind} for PATH-string manipulation
 !include "x64.nsh"
 
 !ifndef VERSION

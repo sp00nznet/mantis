@@ -23,6 +23,7 @@
   "build": {
     "appId": "com.mantis.desktop",
     "productName": "Mantis Desktop",
+    "compression": "maximum",
     "directories": {
       "output": "dist",
       "buildResources": "assets"
@@ -75,7 +76,8 @@
       "artifactName": "Mantis-Desktop-${version}-${os}-${arch}.${ext}"
     },
     "dmg": {
-      "writeUpdateInfo": false
+      "writeUpdateInfo": false,
+      "format": "ULMO"
     },
     "linux": {
       "icon": "assets/icon.png",
