@@ -144,19 +144,18 @@ package:cli:windows:
     - npm run build:sea
     - npm run build:installer
     - New-Item -ItemType Directory -Force -Path releases/windows | Out-Null
-    - Copy-Item -Recurse -Force dist/release/* releases/windows/
-    - Copy-Item -Force dist/Mantis-CLI-Setup-*.exe releases/windows/
     - |
       $zip = "releases/Mantis-CLI-windows-x64-$env:CI_COMMIT_SHORT_SHA.zip"
       if (Test-Path $zip) { Remove-Item -Force $zip }
-      Compress-Archive -Path releases/windows/mantis.exe,releases/windows/admin.html,releases/windows/shared.html,releases/windows/assets -DestinationPath $zip
-      "Bundled: $zip ($('{0:N1}' -f ((Get-Item $zip).Length / 1MB)) MB)"
+      Compress-Archive -Path dist/release/* -DestinationPath $zip
+    - Move-Item -Force dist/Mantis-CLI-Setup-*.exe releases/windows/
+    - "$('{0:N1}' -f ((Get-Item $zip).Length / 1MB)) + ' MB zip'"
+    - Get-ChildItem releases/windows
   artifacts:
     name: "mantis-cli-windows-$CI_COMMIT_SHORT_SHA"
     paths:
       - releases/Mantis-CLI-windows-x64-*.zip
       - releases/windows/Mantis-CLI-Setup-*.exe
-      - releases/windows/
     expire_in: 30 days
 
 package:cli:linux:
@@ -170,16 +169,14 @@ package:cli:linux:
     - npm run build:sea
     - npm run build:installer
     - mkdir -p releases/linux
-    - cp -R dist/release/. releases/linux/
-    - cp dist/mantis-cli_*.deb releases/linux/
-    - tar -C releases/linux -czf "releases/Mantis-CLI-linux-x64-$CI_COMMIT_SHORT_SHA.tar.gz" mantis admin.html shared.html assets
+    - tar -C dist/release -czf "releases/Mantis-CLI-linux-x64-$CI_COMMIT_SHORT_SHA.tar.gz" .
+    - mv dist/mantis-cli_*.deb releases/linux/
     - ls -lh releases/ releases/linux/
   artifacts:
     name: "mantis-cli-linux-$CI_COMMIT_SHORT_SHA"
     paths:
       - releases/Mantis-CLI-linux-x64-*.tar.gz
       - releases/linux/mantis-cli_*.deb
-      - releases/linux/
     expire_in: 30 days
 
 package:cli:macos:
@@ -193,16 +190,14 @@ package:cli:macos:
     - npm run build:sea
     - npm run build:installer
     - mkdir -p releases/macos
-    - cp -R dist/release/. releases/macos/
-    - cp dist/Mantis-CLI-*.pkg releases/macos/
-    - tar -C releases/macos -czf "releases/Mantis-CLI-macos-$CI_COMMIT_SHORT_SHA.tar.gz" mantis admin.html shared.html assets
+    - tar -C dist/release -czf "releases/Mantis-CLI-macos-$CI_COMMIT_SHORT_SHA.tar.gz" .
+    - mv dist/Mantis-CLI-*.pkg releases/macos/
     - ls -lh releases/ releases/macos/
   artifacts:
     name: "mantis-cli-macos-$CI_COMMIT_SHORT_SHA"
     paths:
       - releases/Mantis-CLI-macos-*.tar.gz
       - releases/macos/Mantis-CLI-*.pkg
-      - releases/macos/
     expire_in: 30 days
 
 # ─── desktop installers (electron-builder per OS) ───────────────────────────
@@ -223,12 +218,13 @@ package:desktop:windows:
     - npm run dist:win
     - cd ..
     - New-Item -ItemType Directory -Force -Path releases/windows | Out-Null
-    - Copy-Item -Force desktop/dist/*.exe releases/windows/
+    # Move (not copy) to avoid doubling the artifact size.
+    - Move-Item -Force desktop/dist/*.exe releases/windows/
+    - Get-ChildItem releases/windows
   artifacts:
     name: "mantis-desktop-windows-$CI_COMMIT_SHORT_SHA"
     paths:
       - releases/windows/*.exe
-      - desktop/dist/*.exe
     expire_in: 30 days
 
 package:desktop:linux:
@@ -243,16 +239,14 @@ package:desktop:linux:
     - npm run dist:linux
     - cd ..
     - mkdir -p releases/linux
-    - cp desktop/dist/*.AppImage releases/linux/ 2>/dev/null || true
-    - cp desktop/dist/*.deb      releases/linux/ 2>/dev/null || true
+    - mv desktop/dist/*.AppImage releases/linux/ 2>/dev/null || true
+    - mv desktop/dist/*.deb      releases/linux/ 2>/dev/null || true
     - ls -lh releases/linux/
   artifacts:
     name: "mantis-desktop-linux-$CI_COMMIT_SHORT_SHA"
     paths:
       - releases/linux/*.AppImage
       - releases/linux/*.deb
-      - desktop/dist/*.AppImage
-      - desktop/dist/*.deb
     expire_in: 30 days
 
 package:desktop:macos:
@@ -267,13 +261,12 @@ package:desktop:macos:
     - npm run dist:mac
     - cd ..
     - mkdir -p releases/macos
-    - cp desktop/dist/*.dmg releases/macos/
+    - mv desktop/dist/*.dmg releases/macos/
     - ls -lh releases/macos/
   artifacts:
     name: "mantis-desktop-macos-$CI_COMMIT_SHORT_SHA"
     paths:
       - releases/macos/*.dmg
-      - desktop/dist/*.dmg
     expire_in: 30 days
 
 # ─── deploy ─────────────────────────────────────────────────────────────────

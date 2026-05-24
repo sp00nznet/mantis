@@ -14,6 +14,13 @@
 ;   winget install NSIS.NSIS    or
 ;   choco install nsis
 
+; Unicode + SetCompressor must come BEFORE any !include or directive that
+; emits header data — NSIS 3.0.4.x errors out otherwise ("Can't change
+; target charset after data already got compressed or header already
+; changed!").
+Unicode true
+SetCompressor /SOLID lzma
+
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 !include "x64.nsh"
@@ -37,8 +44,6 @@ OutFile "${OUT_FILE}"
 InstallDir "$PROGRAMFILES64\Mantis"
 InstallDirRegKey HKLM "Software\Mantis" "InstallDir"
 RequestExecutionLevel admin
-SetCompressor /SOLID lzma
-Unicode true
 
 VIProductVersion "${VERSION}.0"
 VIAddVersionKey "ProductName" "${APPNAME}"
