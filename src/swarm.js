@@ -1,5 +1,5 @@
 import { callLLM, createRateLimiter } from './agent.js';
-import { getConfig, saveConfig, PROVIDERS } from './config.js';
+import { getConfig, saveConfig, PROVIDERS, resolveProviderChain, isProviderInCooldown } from './config.js';
 import { readOnlyToolDefinitions, toolDefinitions } from './tool-definitions.js';
 import { buildSwarmPlanPrompt, buildSwarmWorkerPrompt, buildSystemPrompt, buildArchitectPrompt, buildEditorPrompt } from './prompt.js';
 import { executeTool, getWorkingDirectory } from './tools.js';
@@ -176,7 +176,26 @@ function buildProviderConnection(providerKey) {
     model = provider.defaultModel;
   }
 
-  return { url, headers, model, provider };
+  return { url, headers, model, provider, providerKey };
+}
+
+// Build a getFallback for swarm callLLM calls: rotate to the next provider in
+// the failover chain (skipping cooled-down ones and the ones already tried)
+// when a provider keeps erroring. Mirrors the agent-loop failover so the swarm
+// writer doesn't stall on a single dead provider.
+function swarmGetFallback(currentKey) {
+  const config = getConfig();
+  if (config.failover?.enabled === false) return undefined;
+  return (triedKeys) => {
+    const chain = resolveProviderChain();
+    for (const k of chain) {
+      if (k === currentKey || triedKeys.has(k)) continue;
+      if (isProviderInCooldown(k)) continue;
+      const c = buildProviderConnection(k);
+      if (c) return c;
+    }
+    return null;
+  };
 }
 
 // ─── Task Decomposition ─────────────────────────────────────────────
@@ -282,6 +301,7 @@ async function runWorker(workerEntry, subtask, onStatus, isCancelled) {
       onToken: () => {},
       rateLimiter,
       tools: readOnlyToolDefinitions,
+      getFallback: swarmGetFallback(conn.providerKey),
     }, isCancelled);
 
     if (!assistantMsg || isCancelled()) break;
@@ -434,6 +454,7 @@ async function runArchitectPhase(lead, plan, context, originalTask, onStatus, on
     onToken: () => {},
     rateLimiter,
     tools: [], // No tools — pure reasoning
+    getFallback: swarmGetFallback(conn.providerKey),
   }, isCancelled);
 
   return solution || null;
@@ -472,6 +493,7 @@ async function runEditorPhase(editor, architectSolution, onStatus, onText, onToo
       onToken: () => {},
       rateLimiter,
       tools: toolDefinitions,
+      getFallback: swarmGetFallback(conn.providerKey),
     }, isCancelled);
 
     if (!assistantMsg || isCancelled()) return;

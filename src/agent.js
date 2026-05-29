@@ -1,7 +1,7 @@
 import { toolDefinitions } from './tool-definitions.js';
 import { buildSystemPrompt } from './prompt.js';
 import { executeTool, getWorkingDirectory, getPlanMode } from './tools.js';
-import { getConfig, PROVIDERS, buildConnection } from './config.js';
+import { getConfig, PROVIDERS, buildConnection, markProviderCooldown } from './config.js';
 import { shouldCompact, compactMessages, countContextTokens, getContextStats } from './context.js';
 import { classifyHttpError } from './errors.js';
 import { estimateCost } from './pricing.js';
@@ -163,13 +163,33 @@ export function createAgent(agentOpts = {}) {
 
     // Resolve the LLM connection — from this agent's per-user prefs when given,
     // otherwise from the global config.
-    const providerKey = (_prefs && _prefs.provider) || config.provider;
-    const conn = buildConnection(providerKey, _prefs && _prefs.model, _prefs);
+    let providerKey = (_prefs && _prefs.provider) || config.provider;
+    let conn = buildConnection(providerKey, _prefs && _prefs.model, _prefs);
     if (!conn) {
       onError(`Unknown provider: ${providerKey}`);
       return;
     }
-    const { url, headers, provider, model } = conn;
+    let { url, headers, provider, model } = conn;
+
+    // Provider failover chain (config.failover). getFallback hands callLLM the
+    // next usable provider when the current one keeps erroring; once we fail
+    // over we stick to the working provider for the rest of this turn (sticky)
+    // rather than restarting on the dead one each loop iteration.
+    const { resolveProviderChain, isProviderInCooldown } = await import('./config.js');
+    const failoverOn = config.failover?.enabled !== false;
+    const makeGetFallback = () => {
+      if (!failoverOn) return undefined;
+      return (triedKeys) => {
+        const chain = resolveProviderChain(_prefs);
+        for (const k of chain) {
+          if (k === providerKey || triedKeys.has(k)) continue;
+          if (isProviderInCooldown(k)) continue;
+          const c = buildConnection(k, _prefs && _prefs.model && k === providerKey ? _prefs.model : null, _prefs);
+          if (c) return c;
+        }
+        return null;
+      };
+    };
 
     // Connect to MCP servers (cached after the first call) and offer their
     // tools alongside the built-in ones.
@@ -184,15 +204,28 @@ export function createAgent(agentOpts = {}) {
 
     while (loopCount < maxLoops && !_cancelled) {
       loopCount++;
-      const assistantMessage = await callLLM(url, model, messages, headers, provider, { onText, onError, onThinking, onToken, signal, tools: effectiveTools }, () => _cancelled);
+      const assistantMessage = await callLLM(url, model, messages, headers, provider, { onText, onError, onThinking, onToken, signal, tools: effectiveTools, getFallback: makeGetFallback() }, () => _cancelled);
       if (!assistantMessage || _cancelled) return;
+
+      // Sticky failover: if callLLM ended up on a different provider, adopt it
+      // for the rest of this turn so we don't keep retrying the dead one.
+      if (assistantMessage._providerKey && assistantMessage._providerKey !== providerKey) {
+        providerKey = assistantMessage._providerKey;
+        model = assistantMessage._model || model;
+        provider = assistantMessage._provider || provider;
+        const c2 = buildConnection(providerKey, null, _prefs);
+        if (c2) { url = c2.url; headers = c2.headers; }
+      }
+      const usedKey = assistantMessage._providerKey || providerKey;
+      const usedModel = assistantMessage._model || model;
+      delete assistantMessage._provider; delete assistantMessage._providerKey; delete assistantMessage._model;
 
       // Accumulate token usage / cost when the provider reported it.
       if (assistantMessage.usage) {
         const u = assistantMessage.usage;
         usage.prompt += u.prompt_tokens || 0;
         usage.completion += u.completion_tokens || 0;
-        const c = estimateCost(providerKey, model, u.prompt_tokens || 0, u.completion_tokens || 0);
+        const c = estimateCost(usedKey, usedModel, u.prompt_tokens || 0, u.completion_tokens || 0);
         cost += c.cost;
         if (!c.known) costKnown = false;
         delete assistantMessage.usage; // don't carry it back into the history
@@ -319,87 +352,119 @@ export function createAgent(agentOpts = {}) {
   return { chat, clearHistory, refreshSystemPrompt, getMessages, setMessages, getStats, cancel };
 }
 
-export async function callLLM(url, model, messages, headers, provider, { onText, onError, onThinking, onToken, signal, rateLimiter, tools }, isCancelled) {
-  // Throttle to respect provider rate limits before sending
+export async function callLLM(url, model, messages, headers, provider, { onText, onError, onThinking, onToken, signal, rateLimiter, tools, getFallback }, isCancelled) {
   const limiter = rateLimiter || _rateLimiter;
-  await limiter.throttle(provider, null, (msg) => {
-    if (onError) onError(msg);
-  });
 
   if (isCancelled()) return null;
 
+  if (onThinking) onThinking(true);
+
+  // Mutable connection — provider failover swaps these when a provider keeps
+  // erroring. `tried` records every provider key we've burned this call so the
+  // fallback resolver doesn't hand the same dead one back.
+  let curUrl = url, curModel = model, curHeaders = headers, curProvider = provider;
+  let curKey = (provider && provider._key) || null;   // best-effort; getFallback supplies keys
+  const tried = new Set();
+
   const body = {
-    model,
     messages,
     tools: tools || toolDefinitions,
     stream: true,
     stream_options: { include_usage: true }, // ask for a final token-usage chunk
   };
 
-  if (onThinking) onThinking(true);
-
   let response;
   const maxRetries = 5;
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  // Outer loop = provider attempts; inner loop = retries on the current provider.
+  providerLoop:
+  for (;;) {
+    // Throttle for whichever provider is current.
+    await limiter.throttle(curProvider, null, (msg) => { if (onError) onError(msg); });
     if (isCancelled()) { if (onThinking) onThinking(false); return null; }
 
-    try {
-      response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-        signal,
-      });
-    } catch (err) {
-      if (onThinking) onThinking(false);
-      if (err.name === 'AbortError') return null;
-      onError(`Failed to connect to LLM at ${url}. Is the provider running?\n${err.message}`);
-      return null;
-    }
+    let switched = false;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (isCancelled()) { if (onThinking) onThinking(false); return null; }
 
-    // Non-OK response — classify it (see errors.js), retry transient
-    // failures with a countdown, bail immediately on quota/auth/etc.
-    if (!response.ok) {
-      let errBody = '';
-      try { errBody = await response.text(); } catch {}
-      const cls = classifyHttpError(response.status, errBody, response.headers);
-
-      if (cls.retryable && attempt < maxRetries) {
-        // Rate limits: tell the limiter to pace future requests slower, and
-        // back off exponentially here so we clear the provider's cooldown.
-        let waitMs = cls.waitMs;
-        if (cls.kind === 'rate_limit') {
-          limiter.penalize();
-          waitMs = Math.min(cls.waitMs * Math.pow(2, attempt), 60_000);
-        }
-        const waitSec = Math.max(1, Math.round(waitMs / 1000));
-        if (onError) {
-          let remaining = waitSec;
-          onError(`${cls.message} — waiting ${remaining}s (attempt ${attempt + 1}/${maxRetries})`);
-          const countdownInterval = setInterval(() => {
-            remaining--;
-            if (remaining > 0) {
-              // Overwrite previous line with updated countdown
-              process.stdout.write(`\r  ${cls.message} — waiting ${remaining}s (attempt ${attempt + 1}/${maxRetries})  `);
-            }
-          }, 1000);
-          await new Promise(r => setTimeout(r, waitSec * 1000));
-          clearInterval(countdownInterval);
-          process.stdout.write('\r  Retrying...                                           \n');
-        } else {
-          await new Promise(r => setTimeout(r, waitMs));
-        }
-        continue;
+      try {
+        response = await fetch(curUrl, {
+          method: 'POST',
+          headers: curHeaders,
+          body: JSON.stringify({ ...body, model: curModel }),
+          signal,
+        });
+      } catch (err) {
+        if (err.name === 'AbortError') { if (onThinking) onThinking(false); return null; }
+        // Network-level failure — treat like a terminal provider failure so we
+        // can fail over (the provider may simply be unreachable).
+        const next = tryFailover(`Can't reach ${curProvider?.name || curUrl}`);
+        if (next) { switched = true; break; }
+        if (onThinking) onThinking(false);
+        onError(`Failed to connect to LLM at ${curUrl}. Is the provider running?\n${err.message}`);
+        return null;
       }
 
-      // Not retryable, or out of retries — surface the error and stop.
-      if (onThinking) onThinking(false);
-      onError(`${cls.message} (HTTP ${response.status})\n${errBody.slice(0, 600)}`);
-      return null;
+      if (!response.ok) {
+        let errBody = '';
+        try { errBody = await response.text(); } catch {}
+        const cls = classifyHttpError(response.status, errBody, response.headers);
+
+        if (cls.retryable && attempt < maxRetries) {
+          let waitMs = cls.waitMs;
+          if (cls.kind === 'rate_limit') {
+            limiter.penalize();
+            waitMs = Math.min(cls.waitMs * Math.pow(2, attempt), 60_000);
+          }
+          const waitSec = Math.max(1, Math.round(waitMs / 1000));
+          if (onError) {
+            let remaining = waitSec;
+            onError(`${cls.message} — waiting ${remaining}s (attempt ${attempt + 1}/${maxRetries})`);
+            const countdownInterval = setInterval(() => {
+              remaining--;
+              if (remaining > 0) {
+                process.stdout.write(`\r  ${cls.message} — waiting ${remaining}s (attempt ${attempt + 1}/${maxRetries})  `);
+              }
+            }, 1000);
+            await new Promise(r => setTimeout(r, waitSec * 1000));
+            clearInterval(countdownInterval);
+            process.stdout.write('\r  Retrying...                                           \n');
+          } else {
+            await new Promise(r => setTimeout(r, waitMs));
+          }
+          continue;
+        }
+
+        // Terminal for this provider (not retryable, or retries exhausted).
+        // Try to fail over to the next provider before giving up.
+        const next = tryFailover(`${cls.message} (HTTP ${response.status})`);
+        if (next) { switched = true; break; }
+
+        if (onThinking) onThinking(false);
+        onError(`${cls.message} (HTTP ${response.status})\n${errBody.slice(0, 600)}`);
+        return null;
+      }
+
+      break providerLoop; // success — response is set, fall through to streaming
     }
 
-    break; // success
+    if (switched) continue providerLoop;  // retry the whole thing on the new provider
+    break;
+  }
+
+  // Helper hoisted via function declaration: rotate to the next provider if a
+  // fallback resolver was supplied and one is available. Returns true if we
+  // switched the cur* connection, false otherwise.
+  function tryFailover(reason) {
+    if (typeof getFallback !== 'function') return false;
+    if (curKey) { markProviderCooldown(curKey); tried.add(curKey); }
+    const nextConn = getFallback(tried);
+    if (!nextConn) return false;
+    curUrl = nextConn.url; curModel = nextConn.model;
+    curHeaders = nextConn.headers; curProvider = nextConn.provider;
+    curKey = nextConn.providerKey || null;
+    if (onError) onError(`↪ ${reason} — failing over to ${nextConn.provider?.name || curKey}`);
+    return true;
   }
 
   const reader = response.body.getReader();
@@ -508,6 +573,13 @@ export async function callLLM(url, model, messages, headers, provider, { onText,
   if (fullContent) assistantMessage.content = fullContent;
   if (toolCallArray.length > 0) assistantMessage.tool_calls = toolCallArray;
   if (usage) assistantMessage.usage = usage;
+  // Report which provider/model actually answered so the caller can attribute
+  // cost correctly and stick to the working provider after a failover. These
+  // are non-enumerable so they never get serialized into the conversation
+  // history that's sent back to the provider on the next turn.
+  Object.defineProperty(assistantMessage, '_provider',    { value: curProvider, enumerable: false, configurable: true });
+  Object.defineProperty(assistantMessage, '_providerKey', { value: curKey,      enumerable: false, configurable: true });
+  Object.defineProperty(assistantMessage, '_model',       { value: curModel,    enumerable: false, configurable: true });
 
   // Clean success — let the limiter relax any adaptive 429 penalty.
   limiter.reward();

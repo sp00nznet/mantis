@@ -144,6 +144,52 @@ exhaustion (billing) fails fast instead of retrying — see
 
 ---
 
+## Provider failover
+
+When a provider keeps erroring — 5xx server errors, sustained 429s, or quota —
+Mantis can **automatically roll over to the next provider** instead of giving
+up. It cascades down an ordered chain and wraps back to the top; a provider
+that just failed is parked in a short cooldown so it isn't immediately re-hit.
+
+This is what keeps a session alive when, say, NVIDIA NIM's free tier starts
+returning `503 ResourceExhausted` mid-task: the turn quietly continues on Groq
+or Cerebras. Once Mantis fails over, it **sticks** to the working provider for
+the rest of that turn rather than restarting on the dead one each step.
+
+It applies everywhere the agent runs — REPL, headless, desktop, and the swarm
+writer (architect/editor) + explorers.
+
+```bash
+/provider fallback                 # show status + the effective chain
+/provider fallback off             # disable (single-provider, old behaviour)
+/provider fallback on              # re-enable
+/provider fallback auto            # auto chain: active provider, then every keyed one
+/provider fallback groq cerebras nvidia together   # explicit ordered chain
+```
+
+**Auto chain** = the active provider first, then every *other* provider that
+has an API key, in registry order. Keyless local backends (Ollama/LM Studio/
+llama.cpp) are skipped in auto mode — list them explicitly if you want them in
+the rotation. Providers you've excluded from swarm (`swarm.excludeProviders`)
+are also kept out of the failover chain.
+
+Config (`~/.mantis/config.json`):
+
+```json
+{
+  "failover": {
+    "enabled": true,
+    "order": ["groq", "cerebras", "nvidia", "together"],
+    "cooldownMs": 60000
+  }
+}
+```
+
+`order: []` means auto. `cooldownMs` is how long a failed provider is skipped
+before it's eligible again.
+
+---
+
 ## Using providers in other modes
 
 - **Swarm mode** pulls from *every* provider that has a key — see [swarm.md](swarm.md).

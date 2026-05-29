@@ -211,6 +211,17 @@ const DEFAULTS = {
     providerModels: {},       // override default models per provider: { groq: 'llama-3.3-70b', local: 'qwen2.5-coder:14b' }
     minPoolSize: 2,           // if fewer than this many providers have keys, fall back to solo silently
   },
+  // Provider failover — when a provider keeps erroring (5xx/429/quota), rotate
+  // to the next one in the chain instead of giving up. Cascades down the list
+  // and wraps back to the top. A provider that just failed is skipped for
+  // `cooldownMs` before it's eligible again, so we don't immediately re-hit a
+  // dead one. `order: []` = auto chain (active provider first, then every other
+  // provider that has a key / is local).
+  failover: {
+    enabled: true,
+    order: [],                // e.g. ['groq','cerebras','nvidia','together'] — [] = auto
+    cooldownMs: 60000,        // skip a provider this long after it fails terminally
+  },
   // Anthropic-compatible proxy — lets real Claude Code / VS Code / JetBrains
   // route through Mantis's provider pool. See `mantis serve`.
   proxy: {
@@ -282,7 +293,7 @@ export function loadConfig() {
       config = { ...DEFAULTS, ...saved };
       // Deep-merge nested config objects so new default keys survive an old
       // config.json that predates them (shallow spread would drop them).
-      for (const k of ['swarm', 'proxy', 'bots', 'transcription', 'hooks', 'imageGen', 'speech', 'admin', 'auth', 'google', 'localUrls']) {
+      for (const k of ['swarm', 'proxy', 'bots', 'transcription', 'hooks', 'imageGen', 'speech', 'admin', 'auth', 'google', 'localUrls', 'failover']) {
         config[k] = { ...DEFAULTS[k], ...(saved[k] || {}) };
       }
       config.proxy.routes = { ...DEFAULTS.proxy.routes, ...(saved.proxy?.routes || {}) };
@@ -352,7 +363,65 @@ export function buildConnection(providerKey, modelOverride, prefs) {
     || (providerKey === config.provider ? config.model : null)
     || provider.defaultModel;
 
-  return { url, headers, model, provider };
+  return { url, headers, model, provider, providerKey };
+}
+
+// ─── Provider failover ──────────────────────────────────────────────
+// A provider that fails terminally is parked here with the timestamp until
+// which it should be skipped. In-memory only — resets each process.
+const _providerCooldowns = new Map();   // providerKey → epoch ms when eligible again
+
+/** Mark a provider as failed; it'll be skipped until cooldownMs elapses. */
+export function markProviderCooldown(providerKey, cooldownMs) {
+  if (!providerKey) return;
+  const ms = cooldownMs ?? config.failover?.cooldownMs ?? 60000;
+  _providerCooldowns.set(providerKey, Date.now() + ms);
+}
+
+/** Is this provider currently in cooldown (recently failed)? */
+export function isProviderInCooldown(providerKey) {
+  const until = _providerCooldowns.get(providerKey);
+  if (!until) return false;
+  if (Date.now() >= until) { _providerCooldowns.delete(providerKey); return false; }
+  return true;
+}
+
+/**
+ * Ordered list of provider keys to try, best first. Explicit `failover.order`
+ * wins (filtered to providers that are usable — local, or have a key). Otherwise
+ * an auto chain: the active provider first, then every other usable provider.
+ * Excludes the swarm-excluded set so we don't fail over onto a provider the
+ * user deliberately benched.
+ * @param {object} [prefs] per-user prefs (provider/providerKeys override config)
+ * @returns {string[]} provider keys
+ */
+export function resolveProviderChain(prefs) {
+  const keys = (prefs && prefs.providerKeys) || config.providerKeys || {};
+  const active = (prefs && prefs.provider) || config.provider;
+  const excluded = new Set(config.swarm?.excludeProviders || []);
+
+  const usable = (k) => {
+    const p = PROVIDERS[k];
+    if (!p) return false;
+    if (excluded.has(k)) return false;
+    return !p.requiresKey || !!keys[k];   // local providers need no key
+  };
+
+  const explicit = (config.failover?.order || []).filter(usable);
+  if (explicit.length) {
+    // Explicit order is taken as-is (locals allowed — user opted in). Make sure
+    // the active provider is tried even if the user left it out.
+    return explicit.includes(active) ? explicit : [active, ...explicit].filter(usable);
+  }
+
+  // Auto: active first, then every OTHER provider that has an API key. Keyless
+  // local providers (lmstudio/llamacpp/local) are skipped in auto mode unless
+  // they're the active provider — we can't know they're running, and failing
+  // over onto a dead localhost wastes a hop. List them in failover.order to
+  // include them deliberately.
+  const rest = Object.keys(PROVIDERS).filter(k =>
+    k !== active && usable(k) && PROVIDERS[k].requiresKey && !!keys[k]);
+  return [active, ...rest].filter(usable);
 }
 
 export function getConversationsDir() {

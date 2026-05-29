@@ -6,7 +6,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { createAgent } from './agent.js';
 import { setWorkingDirectory, getWorkingDirectory, setPlanMode, getPlanMode } from './tools.js';
-import { loadConfig, saveConfig, getConfig, PROVIDERS } from './config.js';
+import { loadConfig, saveConfig, getConfig, PROVIDERS, resolveProviderChain } from './config.js';
 import { saveConversation, loadConversation, listConversations } from './conversation.js';
 import { getAllSkills, getSkill, saveSkill, deleteSkill, expandSkillPrompt, matchSkillCommand } from './skills.js';
 import { loadAllMemory, clearGlobalMemory, clearProjectMemory, getMemoryStats, loadHandoff, clearHandoff, parseHandoffTasks } from './memory.js';
@@ -929,6 +929,7 @@ async function handleCommand(cmd, rl, agent, ask) {
   Base URL: ${p.baseUrl}
   Model:    ${config.model}
   API Key:  ${p.requiresKey ? (hasKey ? colors.success('configured') : colors.error('not set — use /provider key')) : colors.dim('not required')}
+  Failover: ${config.failover?.enabled !== false ? colors.success(resolveProviderChain().join(' → ')) : colors.dim('off')}
 `);
           break;
         }
@@ -947,6 +948,48 @@ async function handleCommand(cmd, rl, agent, ask) {
           }
           console.log(colors.dim('\n  Use /provider set <name> to switch providers.'));
           console.log(colors.dim('  Use /provider key <name> <apikey> to set an API key.\n'));
+          break;
+        }
+
+        case 'fallback':
+        case 'failover': {
+          const config = getConfig();
+          const action = subParts[1]?.toLowerCase();
+          if (!action || action === 'show' || action === 'list') {
+            const on = config.failover?.enabled !== false;
+            const order = config.failover?.order || [];
+            console.log(colors.header('\n  Provider failover'));
+            console.log(`  Status: ${on ? colors.success('ON') : colors.error('OFF')}` +
+              `  ${colors.dim(`(cooldown ${Math.round((config.failover?.cooldownMs||60000)/1000)}s)`)}`);
+            console.log(`  Mode:   ${order.length ? 'explicit order' : colors.dim('auto (active first, then keyed providers)')}`);
+            console.log(colors.dim('\n  Effective chain (best first):'));
+            const chain = resolveProviderChain();
+            chain.forEach((k, i) => console.log(`    ${i + 1}. ${colors.toolName(k)} ${colors.dim(PROVIDERS[k]?.name || '')}`));
+            console.log(colors.dim('\n  /provider fallback on|off            toggle'));
+            console.log(colors.dim('  /provider fallback auto              clear explicit order'));
+            console.log(colors.dim('  /provider fallback <p1> <p2> <p3>    set explicit order\n'));
+            break;
+          }
+          if (action === 'on' || action === 'off') {
+            saveConfig({ failover: { ...config.failover, enabled: action === 'on' } });
+            console.log(colors.success(`  Failover ${action.toUpperCase()}.\n`));
+            break;
+          }
+          if (action === 'auto' || action === 'clear') {
+            saveConfig({ failover: { ...config.failover, order: [] } });
+            console.log(colors.success('  Failover order cleared — using auto chain.\n'));
+            break;
+          }
+          // Otherwise treat the rest as an explicit ordered list of provider keys.
+          const order = subParts.slice(1).map(s => s.toLowerCase()).filter(Boolean);
+          const unknown = order.filter(k => !PROVIDERS[k]);
+          if (unknown.length) {
+            console.log(colors.error(`  Unknown provider(s): ${unknown.join(', ')}`));
+            console.log(colors.dim('  Use /provider list to see valid keys.\n'));
+            break;
+          }
+          saveConfig({ failover: { ...config.failover, enabled: true, order } });
+          console.log(colors.success(`  Failover order set: ${order.join(' → ')}\n`));
           break;
         }
 
@@ -1987,6 +2030,7 @@ function printHelp() {
   ${colors.toolName('/provider')}          Show current provider
   ${colors.toolName('/provider list')}     List all available providers
   ${colors.toolName('/provider set <n>')}  Switch provider (e.g. together, groq)
+  ${colors.toolName('/provider fallback')}  Show/set the failover chain (on|off|auto|<order>)
   ${colors.toolName('/provider key <n> <k>')} Set API key for a provider
   ${colors.toolName('/provider test')}     Test connection to current provider
   ${colors.toolName('/provider models')}   List models on current provider
