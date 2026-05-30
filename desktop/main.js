@@ -354,7 +354,7 @@ ipcMain.handle('sessions:setAgent', (_e, { sessionId, agentId }) => {
 ipcMain.handle('config:swarmInfo', async () => {
   const { getSwarmPool } = await import('../src/swarm.js');
   const cfg = getConfig();
-  const pool = getSwarmPool();
+  const pool = getSwarmPool(currentPrefs());
   return {
     default: !!cfg.swarm?.default,
     minPoolSize: cfg.swarm?.minPoolSize ?? 2,

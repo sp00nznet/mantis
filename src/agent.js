@@ -572,7 +572,13 @@ export async function callLLM(url, model, messages, headers, provider, { onText,
   const assistantMessage = { role: 'assistant' };
   if (fullContent) assistantMessage.content = fullContent;
   if (toolCallArray.length > 0) assistantMessage.tool_calls = toolCallArray;
-  if (usage) assistantMessage.usage = usage;
+  // Attach token usage non-enumerably: the agent loop reads it for cost
+  // accounting (then deletes it), but it must NOT serialize into the message
+  // history. Swarm replay loops push assistantMsg back verbatim, and strict
+  // providers (Groq) reject a non-standard `usage` field on an assistant
+  // message with HTTP 400. Non-enumerable = invisible to JSON.stringify but
+  // still readable/deletable. Same treatment as the provenance fields below.
+  if (usage) Object.defineProperty(assistantMessage, 'usage', { value: usage, enumerable: false, configurable: true, writable: true });
   // Report which provider/model actually answered so the caller can attribute
   // cost correctly and stick to the working provider after a failover. These
   // are non-enumerable so they never get serialized into the conversation

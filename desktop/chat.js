@@ -19,7 +19,10 @@ function shouldSwarm(prefs, sessionSolo) {
   const cfg = getConfig();
   if (!cfg.swarm?.default) return false;
   const minPool = cfg.swarm?.minPoolSize ?? 2;
-  return getSwarmPool().length >= minPool;
+  // Pass prefs so per-user keys count toward the pool size — otherwise a user
+  // whose keys live only in their prefs would never reach minPool and silently
+  // fall back to solo.
+  return getSwarmPool(prefs).length >= minPool;
 }
 
 /**
@@ -63,7 +66,7 @@ async function runExternalAgentTurn(agentId, session, cwd, text, cb, ctl) {
   if (!result.ok && cb.onError) cb.onError(`[${spec.name}] ${result.error}`);
 }
 
-async function runSwarmTurn(task, cb, ctl) {
+async function runSwarmTurn(task, cb, ctl, prefs) {
   const swarm = runSwarm(task, {
     onText: cb.onText || (() => {}),
     onToolCall: cb.onToolCall || (() => {}),
@@ -74,7 +77,7 @@ async function runSwarmTurn(task, cb, ctl) {
       else if (type === 'phase') cb.onThinking(`swarm ${data}`);
       else if (type === 'error') cb.onError && cb.onError(`swarm: ${data}`);
     },
-  });
+  }, { prefs });
   if (ctl) ctl.swarmCancel = swarm.cancel;
   return swarm.promise;
 }
@@ -93,7 +96,7 @@ export async function runChatTurn(session, { onText, onError, onThinking }, isCa
     const lastUser = [...session.messages].reverse().find(m => m.role === 'user');
     const task = lastUser ? (typeof lastUser.content === 'string' ? lastUser.content : '') : '';
     if (task) {
-      await runSwarmTurn(task, { onText, onError, onThinking }, {});
+      await runSwarmTurn(task, { onText, onError, onThinking }, {}, prefs);
       return null;
     }
   }
@@ -145,7 +148,7 @@ export async function runAgentTurn(session, project, text, cb, ctl, prefs, image
   // Swarm-by-default: route through the swarm orchestrator unless the session
   // is in solo mode or the pool is too small (silent fallback to single agent).
   if (shouldSwarm(prefs, session.solo)) {
-    await runSwarmTurn(text, cb, ctl);
+    await runSwarmTurn(text, cb, ctl, prefs);
     // Note: swarm doesn't update session.messages — caller treats it as one
     // assistant turn. UI shows streamed tokens; session.messages stays append-
     // only on the user text + a synthetic assistant message added by the caller.

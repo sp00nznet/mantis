@@ -9,9 +9,17 @@ import { executeTool, getWorkingDirectory } from './tools.js';
 /**
  * Returns all providers that have API keys configured.
  * Local Ollama is included if the provider exists (no key needed).
+ *
+ * @param {object} [prefs] per-user prefs. When given, prefs.providerKeys
+ *   override the global config.providerKeys — same precedence the chat/agent
+ *   paths use (buildConnection). Without this merge, keys a user added through
+ *   the desktop/admin UI (stored in per-user prefs, not global config) were
+ *   invisible to the swarm, so the pool silently collapsed to [local] and the
+ *   swarm fell back to solo.
  */
-export function getSwarmPool() {
+export function getSwarmPool(prefs) {
   const config = getConfig();
+  const keys = (prefs && prefs.providerKeys) || config.providerKeys || {};
   const excluded = config.swarm?.excludeProviders || [];
   const pool = [];
 
@@ -19,7 +27,7 @@ export function getSwarmPool() {
     if (excluded.includes(key)) continue;
     if (key === 'local') {
       pool.push({ key, provider, hasKey: true });
-    } else if (config.providerKeys?.[key]) {
+    } else if (keys[key]) {
       pool.push({ key, provider, hasKey: true });
     }
   }
@@ -141,19 +149,28 @@ export function selectLead(pool, override, task) {
 
 // ─── Provider URL/Headers Builder ───────────────────────────────────
 
-function buildProviderConnection(providerKey) {
+function buildProviderConnection(providerKey, prefs) {
   const config = getConfig();
   const provider = PROVIDERS[providerKey];
   if (!provider) return null;
+
+  // prefs (per-user) override global config for keys + local backend URLs,
+  // mirroring config.buildConnection() so swarm workers authenticate with the
+  // same keys the chat/agent paths use.
+  const keys = (prefs && prefs.providerKeys) || config.providerKeys || {};
+  const ollamaUrl = (prefs && prefs.ollamaUrl) || config.ollamaUrl;
+  const localUrls = (prefs && prefs.localUrls) || config.localUrls || {};
 
   let url;
   let headers = { 'Content-Type': 'application/json' };
 
   if (providerKey === 'local') {
-    url = `${config.ollamaUrl}/v1/chat/completions`;
+    url = `${ollamaUrl.replace(/\/+$/, '')}/v1/chat/completions`;
   } else {
-    url = `${provider.baseUrl.replace(/\/+$/, '')}/chat/completions`;
-    const apiKey = config.providerKeys?.[providerKey];
+    const baseOverride = (localUrls[providerKey] || '').trim();
+    const base = baseOverride || provider.baseUrl;
+    url = `${base.replace(/\/+$/, '')}/chat/completions`;
+    const apiKey = keys[providerKey];
     if (apiKey) {
       headers['Authorization'] = `Bearer ${apiKey}`;
     }
@@ -183,15 +200,15 @@ function buildProviderConnection(providerKey) {
 // the failover chain (skipping cooled-down ones and the ones already tried)
 // when a provider keeps erroring. Mirrors the agent-loop failover so the swarm
 // writer doesn't stall on a single dead provider.
-function swarmGetFallback(currentKey) {
+function swarmGetFallback(currentKey, prefs) {
   const config = getConfig();
   if (config.failover?.enabled === false) return undefined;
   return (triedKeys) => {
-    const chain = resolveProviderChain();
+    const chain = resolveProviderChain(prefs);
     for (const k of chain) {
       if (k === currentKey || triedKeys.has(k)) continue;
       if (isProviderInCooldown(k)) continue;
-      const c = buildProviderConnection(k);
+      const c = buildProviderConnection(k, prefs);
       if (c) return c;
     }
     return null;
@@ -204,8 +221,8 @@ function swarmGetFallback(currentKey) {
  * Ask the lead to decompose a task into explore/code/review subtasks.
  * Returns parsed plan object or null on failure.
  */
-async function decomposeTask(lead, task, onStatus, isCancelled) {
-  const conn = buildProviderConnection(lead.key);
+async function decomposeTask(lead, task, onStatus, isCancelled, prefs) {
+  const conn = buildProviderConnection(lead.key, prefs);
   if (!conn) return null;
 
   // Get a quick directory listing so the lead knows what project it's in
@@ -275,8 +292,8 @@ async function decomposeTask(lead, task, onStatus, isCancelled) {
  * Run a single worker's exploration subtask.
  * Workers get read-only tools and their own rate limiter.
  */
-async function runWorker(workerEntry, subtask, onStatus, isCancelled) {
-  const conn = buildProviderConnection(workerEntry.key);
+async function runWorker(workerEntry, subtask, onStatus, isCancelled, prefs) {
+  const conn = buildProviderConnection(workerEntry.key, prefs);
   if (!conn) return { id: subtask.id, provider: workerEntry.key, result: null, error: 'No connection' };
 
   const rateLimiter = createRateLimiter();
@@ -301,7 +318,7 @@ async function runWorker(workerEntry, subtask, onStatus, isCancelled) {
       onToken: () => {},
       rateLimiter,
       tools: readOnlyToolDefinitions,
-      getFallback: swarmGetFallback(conn.providerKey),
+      getFallback: swarmGetFallback(conn.providerKey, prefs),
     }, isCancelled);
 
     if (!assistantMsg || isCancelled()) break;
@@ -334,12 +351,12 @@ async function runWorker(workerEntry, subtask, onStatus, isCancelled) {
 /**
  * Run a single worker with 30s timeout. On failure, retry on a fallback worker.
  */
-async function runWorkerWithFallback(worker, subtask, allWorkers, onStatus, isCancelled) {
+async function runWorkerWithFallback(worker, subtask, allWorkers, onStatus, isCancelled, prefs) {
   // Try primary worker
   try {
     if (onStatus) onStatus('explore-start', worker.key, subtask.description);
     const result = await Promise.race([
-      runWorker(worker, subtask, onStatus, isCancelled),
+      runWorker(worker, subtask, onStatus, isCancelled, prefs),
       new Promise((_, reject) => setTimeout(() => reject(new Error('Worker timeout (30s)')), 30_000)),
     ]);
     if (result.error && !isCancelled()) {
@@ -348,7 +365,7 @@ async function runWorkerWithFallback(worker, subtask, allWorkers, onStatus, isCa
       if (fallback) {
         if (onStatus) onStatus('fallback', fallback.key, `retrying ${subtask.id} (was ${worker.key})`);
         return await Promise.race([
-          runWorker(fallback, subtask, onStatus, isCancelled),
+          runWorker(fallback, subtask, onStatus, isCancelled, prefs),
           new Promise((_, reject) => setTimeout(() => reject(new Error('Fallback timeout (30s)')), 30_000)),
         ]);
       }
@@ -362,7 +379,7 @@ async function runWorkerWithFallback(worker, subtask, allWorkers, onStatus, isCa
       if (onStatus) onStatus('fallback', fallback.key, `retrying ${subtask.id} (${worker.key} failed: ${err.message})`);
       try {
         return await Promise.race([
-          runWorker(fallback, subtask, onStatus, isCancelled),
+          runWorker(fallback, subtask, onStatus, isCancelled, prefs),
           new Promise((_, reject) => setTimeout(() => reject(new Error('Fallback timeout (30s)')), 30_000)),
         ]);
       } catch (err2) {
@@ -377,7 +394,7 @@ async function runWorkerWithFallback(worker, subtask, allWorkers, onStatus, isCa
  * Run explore subtasks in parallel across workers.
  * Assigns tasks round-robin. Failed workers auto-fallback to another provider.
  */
-async function runParallelExplorers(subtasks, workers, onStatus, isCancelled) {
+async function runParallelExplorers(subtasks, workers, onStatus, isCancelled, prefs) {
   if (subtasks.length === 0) return [];
 
   const config = getConfig();
@@ -392,7 +409,7 @@ async function runParallelExplorers(subtasks, workers, onStatus, isCancelled) {
 
   const results = await Promise.allSettled(
     assignments.map(({ worker, subtask }) =>
-      runWorkerWithFallback(worker, subtask, activeWorkers, onStatus, isCancelled)
+      runWorkerWithFallback(worker, subtask, activeWorkers, onStatus, isCancelled, prefs)
     )
   );
 
@@ -431,8 +448,8 @@ function mergeExplorationResults(results) {
  * Architect phase: lead reasons about the solution (no tools, pure text).
  * Returns the architect's solution text.
  */
-async function runArchitectPhase(lead, plan, context, originalTask, onStatus, onText, isCancelled) {
-  const conn = buildProviderConnection(lead.key);
+async function runArchitectPhase(lead, plan, context, originalTask, onStatus, onText, isCancelled, prefs) {
+  const conn = buildProviderConnection(lead.key, prefs);
   if (!conn) return null;
 
   const rateLimiter = createRateLimiter();
@@ -454,7 +471,7 @@ async function runArchitectPhase(lead, plan, context, originalTask, onStatus, on
     onToken: () => {},
     rateLimiter,
     tools: [], // No tools — pure reasoning
-    getFallback: swarmGetFallback(conn.providerKey),
+    getFallback: swarmGetFallback(conn.providerKey, prefs),
   }, isCancelled);
 
   return solution || null;
@@ -464,8 +481,8 @@ async function runArchitectPhase(lead, plan, context, originalTask, onStatus, on
  * Editor phase: a worker (or the lead) takes the architect's solution and makes edits.
  * Gets full tool access.
  */
-async function runEditorPhase(editor, architectSolution, onStatus, onText, onToolCall, onToolResult, isCancelled) {
-  const conn = buildProviderConnection(editor.key);
+async function runEditorPhase(editor, architectSolution, onStatus, onText, onToolCall, onToolResult, isCancelled, prefs) {
+  const conn = buildProviderConnection(editor.key, prefs);
   if (!conn) return;
 
   const rateLimiter = createRateLimiter();
@@ -493,7 +510,7 @@ async function runEditorPhase(editor, architectSolution, onStatus, onText, onToo
       onToken: () => {},
       rateLimiter,
       tools: toolDefinitions,
-      getFallback: swarmGetFallback(conn.providerKey),
+      getFallback: swarmGetFallback(conn.providerKey, prefs),
     }, isCancelled);
 
     if (!assistantMsg || isCancelled()) return;
@@ -520,11 +537,11 @@ async function runEditorPhase(editor, architectSolution, onStatus, onText, onToo
  * Code phase: uses Architect/Editor split when a separate editor worker is available.
  * Falls back to single-provider (lead does both) when no workers are free.
  */
-async function runCodePhase(lead, workers, plan, context, originalTask, onStatus, onText, onToolCall, onToolResult, isCancelled) {
+async function runCodePhase(lead, workers, plan, context, originalTask, onStatus, onText, onToolCall, onToolResult, isCancelled, prefs) {
   // If context is null, exploration completely failed — lead must explore + code with full tools
   if (context === null) {
     if (onStatus) onStatus('phase-detail', lead.key, 'Fallback: lead exploring and coding with full tools...');
-    const conn = buildProviderConnection(lead.key);
+    const conn = buildProviderConnection(lead.key, prefs);
     if (!conn) return;
     const rateLimiter = createRateLimiter();
     const cwd = getWorkingDirectory();
@@ -583,7 +600,7 @@ async function runCodePhase(lead, workers, plan, context, originalTask, onStatus
 
     const solutionResults = await Promise.allSettled(
       architects.map(a => Promise.race([
-        getArchitectSolution(a, plan, context, originalTask, isCancelled),
+        getArchitectSolution(a, plan, context, originalTask, isCancelled, prefs),
         new Promise((_, reject) => setTimeout(() => reject(new Error('Architect timeout')), 45_000)),
       ]))
     );
@@ -610,25 +627,25 @@ async function runCodePhase(lead, workers, plan, context, originalTask, onStatus
       }, workers[0]);
 
       if (onStatus) onStatus('phase-detail', judge.key, `Judging ${solutions.length} solutions...`);
-      const bestIdx = await judgeSolutions(judge, solutions, originalTask, isCancelled);
+      const bestIdx = await judgeSolutions(judge, solutions, originalTask, isCancelled, prefs);
       winningSolution = solutions[bestIdx].solution;
       if (onStatus) onStatus('phase-detail', solutions[bestIdx].provider, `Winner: solution ${bestIdx + 1} from ${solutions[bestIdx].provider}`);
     }
 
     if (isCancelled()) return;
     if (onStatus) onStatus('phase-detail', editorCandidate.key, 'Editor implementing winning solution...');
-    await runEditorPhase(editorCandidate, winningSolution, onStatus, null, onToolCall, onToolResult, isCancelled);
+    await runEditorPhase(editorCandidate, winningSolution, onStatus, null, onToolCall, onToolResult, isCancelled, prefs);
   }
   // Architect/Editor split: lead reasons, editor implements
   else if (editorCandidate) {
     if (onStatus) onStatus('phase-detail', lead.key, 'Architect reasoning...');
-    const solution = await runArchitectPhase(lead, plan, context, originalTask, onStatus, onText, isCancelled);
+    const solution = await runArchitectPhase(lead, plan, context, originalTask, onStatus, onText, isCancelled, prefs);
     if (!solution || isCancelled()) return;
 
     // If architect bailed with INSUFFICIENT CONTEXT, fall back to lead with full tools
     if (solution.includes('INSUFFICIENT CONTEXT')) {
       if (onStatus) onStatus('phase-detail', lead.key, 'Architect had insufficient context — lead taking over with full tools...');
-      const conn = buildProviderConnection(lead.key);
+      const conn = buildProviderConnection(lead.key, prefs);
       if (!conn) return;
       const rateLimiter = createRateLimiter();
       const cwd = getWorkingDirectory();
@@ -666,10 +683,10 @@ async function runCodePhase(lead, workers, plan, context, originalTask, onStatus
     }
 
     if (onStatus) onStatus('phase-detail', editorCandidate.key, 'Editor implementing...');
-    await runEditorPhase(editorCandidate, solution, onStatus, null, onToolCall, onToolResult, isCancelled);
+    await runEditorPhase(editorCandidate, solution, onStatus, null, onToolCall, onToolResult, isCancelled, prefs);
   } else {
     // Fallback: lead does both (original single-provider behavior)
-    const conn = buildProviderConnection(lead.key);
+    const conn = buildProviderConnection(lead.key, prefs);
     if (!conn) return;
 
     const rateLimiter = createRateLimiter();
@@ -714,8 +731,8 @@ async function runCodePhase(lead, workers, plan, context, originalTask, onStatus
 /**
  * Get a single architect solution from a provider (no tools).
  */
-async function getArchitectSolution(providerEntry, plan, context, task, isCancelled) {
-  const conn = buildProviderConnection(providerEntry.key);
+async function getArchitectSolution(providerEntry, plan, context, task, isCancelled, prefs) {
+  const conn = buildProviderConnection(providerEntry.key, prefs);
   if (!conn) return { provider: providerEntry.key, solution: null };
 
   const rateLimiter = createRateLimiter();
@@ -743,8 +760,8 @@ async function getArchitectSolution(providerEntry, plan, context, task, isCancel
  * Ask a judge (fast cheap provider) to pick the best solution from N candidates.
  * Returns the index of the best solution (0-based).
  */
-async function judgeSolutions(judgeEntry, solutions, task, isCancelled) {
-  const conn = buildProviderConnection(judgeEntry.key);
+async function judgeSolutions(judgeEntry, solutions, task, isCancelled, prefs) {
+  const conn = buildProviderConnection(judgeEntry.key, prefs);
   if (!conn) return 0;
 
   const rateLimiter = createRateLimiter();
@@ -782,10 +799,10 @@ async function judgeSolutions(judgeEntry, solutions, task, isCancelled) {
 
 // ─── Review Phase ───────────────────────────────────────────────────
 
-async function runReviewPhase(reviewer, reviewDescription, explorationContext, onStatus, isCancelled) {
+async function runReviewPhase(reviewer, reviewDescription, explorationContext, onStatus, isCancelled, prefs) {
   if (!reviewDescription) return null;
 
-  const conn = buildProviderConnection(reviewer.key);
+  const conn = buildProviderConnection(reviewer.key, prefs);
   if (!conn) return null;
 
   const rateLimiter = createRateLimiter();
@@ -839,7 +856,10 @@ async function runReviewPhase(reviewer, reviewDescription, explorationContext, o
  *
  * @param {string} task - The user's task description
  * @param {object} callbacks - { onStatus, onText, onToolCall, onToolResult }
- * @param {object} options - { leadOverride, signal }
+ * @param {object} options - { leadOverride, signal, prefs }
+ *   prefs: per-user prefs whose providerKeys/ollamaUrl/localUrls override the
+ *   global config, so the pool and every worker connection see the keys a user
+ *   added through the UI (desktop/admin store them per-user, not in config).
  * @returns {object} { success, totalCalls, totalProviders, elapsed }
  */
 /**
@@ -857,10 +877,10 @@ export function runSwarm(task, callbacks = {}, options = {}) {
 
 async function _runSwarmInner(task, callbacks, options, isCancelled) {
   const { onStatus, onText, onToolCall, onToolResult } = callbacks;
-  const { leadOverride } = options;
+  const { leadOverride, prefs } = options;
 
   const startTime = Date.now();
-  const pool = getSwarmPool();
+  const pool = getSwarmPool(prefs);
 
   if (pool.length < 2) {
     if (onStatus) onStatus('error', null, 'Swarm needs at least 2 configured providers. Use /provider key <name> <key> to add more.');
@@ -875,7 +895,7 @@ async function _runSwarmInner(task, callbacks, options, isCancelled) {
 
   // Phase 1: Planning
   if (onStatus) onStatus('phase', lead.key, 'PLAN');
-  const plan = await decomposeTask(lead, task, onStatus, isCancelled);
+  const plan = await decomposeTask(lead, task, onStatus, isCancelled, prefs);
 
   if (isCancelled()) return { success: false };
 
@@ -894,7 +914,7 @@ async function _runSwarmInner(task, callbacks, options, isCancelled) {
   let mergedContext;
   if (plan.explore.length > 0) {
     if (onStatus) onStatus('phase', null, 'EXPLORE');
-    const exploreResults = await runParallelExplorers(plan.explore, workers, onStatus, isCancelled);
+    const exploreResults = await runParallelExplorers(plan.explore, workers, onStatus, isCancelled, prefs);
     if (isCancelled()) return { success: false };
 
     mergedContext = mergeExplorationResults(exploreResults);
@@ -911,7 +931,7 @@ async function _runSwarmInner(task, callbacks, options, isCancelled) {
 
   // Phase 3: Code Writing (architect/editor split, or fallback if exploration failed)
   if (onStatus) onStatus('phase', lead.key, 'CODE');
-  await runCodePhase(lead, workers, plan, mergedContext, task, onStatus, onText, onToolCall, onToolResult, isCancelled);
+  await runCodePhase(lead, workers, plan, mergedContext, task, onStatus, onText, onToolCall, onToolResult, isCancelled, prefs);
   if (isCancelled()) return { success: false };
 
   // Phase 4: Review (optional, uses a different worker)
@@ -920,7 +940,7 @@ async function _runSwarmInner(task, callbacks, options, isCancelled) {
     // Pick a reviewer — prefer one that wasn't heavily used in explore
     const reviewer = workers[workers.length - 1]; // last worker = likely least loaded
     if (onStatus) onStatus('phase', reviewer.key, 'REVIEW');
-    reviewResult = await runReviewPhase(reviewer, plan.review.description, mergedContext || '(no exploration context)', onStatus, isCancelled);
+    reviewResult = await runReviewPhase(reviewer, plan.review.description, mergedContext || '(no exploration context)', onStatus, isCancelled, prefs);
     if (reviewResult && onStatus) onStatus('review-done', reviewer.key, reviewResult);
   }
 
