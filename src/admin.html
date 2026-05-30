@@ -516,6 +516,7 @@
 "use strict";
 var STATE = null, SESSIONS = [], SEL = null, GRID = false;
 var TERMS = {};            // id -> { term, fit, es }
+var APPROVALS_UI = {};     // id -> the approval-panel element of the open (full) session
 var TIERS = ['opus','sonnet','haiku','default'];
 var XTERM_THEME = {
   background: '#0a0e14', foreground: '#c9d1d9', cursor: '#3fb950',
@@ -1184,6 +1185,12 @@ function buildTerminal(s, mini) {
   var host = el('div', { class: 'term-host' + (mini ? ' mini' : '') });
   wrap.appendChild(host);
 
+  // Tool-approval panel (Claude in "ask" mode). Populated by the SSE handler.
+  var approveBox = el('div');
+  approveBox.style.cssText = 'display:none;padding:8px 10px;border-top:1px solid var(--border);background:var(--surface);font-size:12px';
+  wrap.appendChild(approveBox);
+  if (!mini) APPROVALS_UI[s.id] = approveBox;
+
   if (!mini) {
     var ir = el('div', { class: 'input-row' });
     var attached = []; // { kind:'image'|'text', name, dataUrl|content }
@@ -1229,11 +1236,25 @@ function buildTerminal(s, mini) {
       });
     }
     populateAgents();
+    // Per-chat "ask before tools" toggle — only meaningful for Claude Code.
+    var askWrap = el('label');
+    askWrap.style.cssText = 'display:none;align-items:center;gap:4px;font-size:11px;color:var(--dim);white-space:nowrap;align-self:center';
+    var askCb = el('input', { type: 'checkbox', title: 'Ask before each Claude tool use (vs. full autonomy)' });
+    askCb.checked = !!s.claudeAsk;
+    askWrap.appendChild(askCb);
+    askWrap.appendChild(document.createTextNode('approve tools'));
+    function updateAskVisibility() { askWrap.style.display = (agentSel.value === 'claude') ? 'inline-flex' : 'none'; }
+    updateAskVisibility();
+    askCb.onchange = function() {
+      api('POST', '/api/sessions/' + s.id + '/claude-ask', { ask: askCb.checked });
+      s.claudeAsk = askCb.checked;
+    };
     agentSel.onchange = function() {
       // Persist the session-level default. fire() also includes it in /input
       // for the cases where the user just sent before this change took effect.
       api('POST', '/api/sessions/' + s.id + '/agent', { agentId: agentSel.value });
       s.agent = agentSel.value;
+      updateAskVisibility();
     };
     var send = el('button', null, 'Send');
     function fire() {
@@ -1254,7 +1275,7 @@ function buildTerminal(s, mini) {
     send.onclick = fire;
     ta.onkeydown = function(e){ if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fire(); } };
     ir.appendChild(clip); ir.appendChild(fileInput);
-    ir.appendChild(ta); ir.appendChild(chip); ir.appendChild(agentSel); ir.appendChild(send);
+    ir.appendChild(ta); ir.appendChild(chip); ir.appendChild(agentSel); ir.appendChild(askWrap); ir.appendChild(send);
     wrap.appendChild(ir);
   }
 
@@ -1281,6 +1302,8 @@ function openTerm(id, host) {
       var s = SESSIONS.filter(function(x){ return x.id === id; })[0];
       if (s && s.status !== f.status) { s.status = f.status; renderChipDots(); }
     }
+    else if (f.type === 'approval') renderApproval(id, term, f);
+    else if (f.type === 'approval-resolved') clearApproval(id);
   };
   es.onerror = function(){ /* auto-reconnects */ };
   TERMS[id] = { term: term, fit: fit, es: es };
@@ -1291,6 +1314,38 @@ function closeTerm(id) {
   try { t.es.close(); } catch (e) {}
   try { t.term.dispose(); } catch (e) {}
   delete TERMS[id];
+}
+function renderApproval(id, term, f) {
+  var box = APPROVALS_UI[id];
+  if (!box) { try { term.write('\r\n\x1b[33m[approval needed — open this session to respond]\x1b[0m\r\n'); } catch (e) {} return; }
+  var preview = '';
+  try { preview = JSON.stringify(f.input); } catch (e) { preview = String(f.input); }
+  if (preview && preview.length > 300) preview = preview.slice(0, 300) + '…';
+  box.innerHTML = '';
+  var title = el('div');
+  title.style.cssText = 'margin-bottom:6px';
+  title.innerHTML = '<b style="color:#d29922">Claude wants to use</b> <code>' + esc(f.tool) + '</code>' +
+    (preview ? ' <span style="color:var(--dimmer)">' + esc(preview) + '</span>' : '');
+  box.appendChild(title);
+  var row = el('div'); row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
+  function btn(label, decision, scope, cls) {
+    var b = el('button', cls ? { class: cls } : null, label);
+    b.onclick = function() {
+      api('POST', '/api/sessions/' + id + '/approve', { approvalId: f.id, decision: decision, scope: scope });
+      clearApproval(id);
+    };
+    return b;
+  }
+  row.appendChild(btn('Deny', 'deny', 'once', 'alt'));
+  row.appendChild(btn('Allow once', 'allow', 'once'));
+  row.appendChild(btn('Allow for session', 'allow', 'session'));
+  row.appendChild(btn('Allow always', 'allow', 'always'));
+  box.appendChild(row);
+  box.style.display = 'block';
+}
+function clearApproval(id) {
+  var box = APPROVALS_UI[id];
+  if (box) { box.innerHTML = ''; box.style.display = 'none'; }
 }
 function renderChipDots() {
   document.getElementById('navSessCount').textContent = SESSIONS.length;

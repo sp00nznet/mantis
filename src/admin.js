@@ -25,8 +25,9 @@ import { getConfig, saveConfig, PROVIDERS } from './config.js';
 import { getWorkingDirectory } from './tools.js';
 import {
   listSessions, getSession, createWebSession, removeSession, sendInput, stopSession,
-  setSessionAgent, restoreSessions,
+  setSessionAgent, setSessionClaudeAsk, restoreSessions, setApprovalAdminBase,
 } from './sessions.js';
+import { requestApproval, resolveApproval } from './approvals.js';
 import * as auth from './auth.js';
 import * as users from './users.js';
 import * as accounts from './accounts.js';
@@ -376,6 +377,18 @@ async function handleSessionApi(req, res, parts) {
     // .chat() on. setSessionAgent writes to session.agentId and checkpoints.
     setSessionAgent(id, agentId);
     return sendJson(res, 200, { ok: true, agent: agentId });
+  }
+  if (action === 'claude-ask' && req.method === 'POST') {
+    const body = await readJson(req);
+    setSessionClaudeAsk(id, !!body.ask);
+    return sendJson(res, 200, { ok: true, claudeAsk: !!body.ask });
+  }
+  if (action === 'approve' && req.method === 'POST') {
+    const body = await readJson(req);
+    const decision = body.decision === 'allow' ? 'allow' : 'deny';
+    const scope = ['once', 'session', 'always'].includes(body.scope) ? body.scope : 'once';
+    const ok = resolveApproval(id, String(body.approvalId || ''), decision, scope);
+    return sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { error: 'No such pending approval' });
   }
   if (action === 'stop' && req.method === 'POST') {
     stopSession(id);
@@ -748,6 +761,16 @@ export async function handleAdminRequest(req, res) {
       return await handleShared(req, res, url);
     }
 
+    // Claude approval bridge — the local MCP subprocess POSTs here when Claude
+    // wants a tool. No login (it has no cookie); the turn token is the
+    // credential and it must come from loopback (same box as the agent).
+    if (url === '/api/approval/request' && req.method === 'POST') {
+      if (!isLoopback(req)) { res.writeHead(403); res.end(); return; }
+      const body = await readJson(req, 1 * 1024 * 1024);
+      const decision = await requestApproval(String(body.turn || ''), String(body.toolName || 'unknown'), body.input ?? {});
+      return sendJson(res, 200, decision);
+    }
+
     if (authOn) {
       // Network access allowed; require a valid session.
       const session = auth.getSession(auth.readCookie(req, auth.COOKIE_NAME));
@@ -810,6 +833,9 @@ export function startAdmin({ port, host } = {}) {
         if (p !== wantPort) console.log(`  [admin] port ${wantPort} was in use — using ${p}`);
         console.log(`  [admin] control panel at http://${listenHost === '0.0.0.0' ? '127.0.0.1' : listenHost}:${p}/admin`);
         if (listenHost === '0.0.0.0') console.log('  [admin] reachable on your network — sign-in required');
+        // The Claude approval bridge always calls home over loopback on the
+        // ACTUAL port (which may differ from wantPort if it was in use).
+        setApprovalAdminBase(`http://127.0.0.1:${p}`);
         resolve(server);
       });
     };

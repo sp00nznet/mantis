@@ -219,9 +219,12 @@ const DEFAULTS = {
     claude: {
       // Launch Claude Code with --dangerously-skip-permissions so it runs
       // autonomously (no terminal to approve tool use at in a session). Turn
-      // this off to make Claude respect its normal permission prompts — note it
-      // will then stall on the first tool that needs approval.
+      // this off (globally, or per chat) to broker each tool use through the
+      // in-session Allow/Deny prompt instead.
       skipPermissions: true,
+      // Tool names blessed via "Allow always" in the approval prompt — these are
+      // auto-approved across all sessions. Grows as the user clicks.
+      allowedTools: [],
     },
   },
   // Provider failover — when a provider keeps erroring (5xx/429/quota), rotate

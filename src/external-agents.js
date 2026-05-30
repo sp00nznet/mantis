@@ -15,8 +15,39 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { getConfig } from './config.js';
 import { augmentedEnv } from './utils.js';
+
+const APPROVAL_MCP_SCRIPT = fileURLToPath(new URL('../scripts/claude-approval-mcp.mjs', import.meta.url));
+
+/**
+ * Build the Claude permission flags for one run.
+ *  - opts.claudeApproval { adminBase, turn } → interactive approvals: launch the
+ *    stdio MCP bridge as --permission-prompt-tool so each tool use is brokered.
+ *  - else → --dangerously-skip-permissions unless explicitly disabled
+ *    (opts.skipPermissions, falling back to the global config default).
+ */
+function claudePermissionArgs(opts) {
+  if (opts.claudeApproval) {
+    const { adminBase, turn } = opts.claudeApproval;
+    const mcpConfig = JSON.stringify({
+      mcpServers: {
+        mantis: {
+          command: process.execPath,
+          args: [APPROVAL_MCP_SCRIPT],
+          env: {
+            MANTIS_APPROVAL_URL: `${adminBase}/api/approval/request`,
+            MANTIS_TURN: turn,
+          },
+        },
+      },
+    });
+    return ['--permission-prompt-tool', 'mcp__mantis__approval_prompt', '--mcp-config', mcpConfig];
+  }
+  const skip = opts.skipPermissions ?? (getConfig().externalAgents?.claude?.skipPermissions !== false);
+  return skip ? ['--dangerously-skip-permissions'] : [];
+}
 
 // ─── Registry ───────────────────────────────────────────────────────
 // `spawn(prompt, cwd)` returns { args, stdinMode }. stdinMode = 'none' means
@@ -29,19 +60,13 @@ const AGENT_REGISTRY = {
   claude: {
     name: 'Claude Code',
     bin: 'claude',
-    // --dangerously-skip-permissions: there is no terminal to approve tool use
-    // at in a Mantis session, so without it Claude hangs forever waiting for
-    // permission. On by default (matches Mantis's auto-approving web sessions
-    // and the other CLIs' yolo flags); toggle via
-    // config.externalAgents.claude.skipPermissions (Settings → External Agents).
-    // Safe here: the box runs as a non-root user; Claude refuses the flag as root.
-    spawn: (prompt) => {
-      const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose'];
-      if (getConfig().externalAgents?.claude?.skipPermissions !== false) {
-        args.push('--dangerously-skip-permissions');
-      }
-      return { args, stdinMode: 'none' };
-    },
+    // Base args only. The permission flags (--dangerously-skip-permissions OR
+    // the --permission-prompt-tool approval bridge) are appended in
+    // runExternalAgent() from per-call opts, since the choice is per-session.
+    spawn: (prompt) => ({
+      args: ['-p', prompt, '--output-format', 'stream-json', '--verbose'],
+      stdinMode: 'none',
+    }),
     parseStream: 'claude-stream-json',
     risk: 'medium',                       // respects .claude/settings.json denies
     streams: true,
@@ -201,6 +226,10 @@ export function runExternalAgent(id, prompt, opts = {}) {
   let command = spec.bin;
   let finalArgs = [...(spec.extraArgs || []), ...args];
 
+  // Claude permission flags (skip-permissions, or the interactive approval
+  // bridge) are decided per call, not baked into the registry spawn().
+  if (id === 'claude') finalArgs.push(...claudePermissionArgs(opts));
+
   // Windows .cmd shim handling — same pattern as src/mcp.js _spawnStdio.
   if (process.platform === 'win32') {
     finalArgs = ['/c', command, ...finalArgs];
@@ -223,9 +252,12 @@ export function runExternalAgent(id, prompt, opts = {}) {
   // assumed wedged (e.g. blocked on a prompt) and killed — otherwise a hung
   // subprocess pins the session on 'running' forever and bricks it. Any output
   // resets the timer, so long-but-active builds are never cut off. 0 disables.
-  const inactivityMs = opts.inactivityMs
+  // Disabled in approval mode: silence there means "waiting for the human", and
+  // the approval broker has its own timeout as the backstop.
+  const inactivityMs = opts.claudeApproval ? 0 : (
+    opts.inactivityMs
     ?? getConfig().externalAgents?.inactivityTimeoutMs
-    ?? 180_000;
+    ?? 180_000);
   let idleTimer = null;
   const bumpIdle = () => {
     if (!inactivityMs) return;

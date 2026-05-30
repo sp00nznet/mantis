@@ -12,11 +12,13 @@
 
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { createAgent } from './agent.js';
 import { runExternalAgent, resolveAgentSpec } from './external-agents.js';
 import { runSwarm, getSwarmPool } from './swarm.js';
 import { getConfig } from './config.js';
 import { getUserPrefs, listUsers, userHubSessionsDir } from './users.js';
+import { registerTurn, unregisterTurn } from './approvals.js';
 import { setWorkingDirectory, getWorkingDirectory } from './tools.js';
 import { truncate } from './utils.js';
 
@@ -24,6 +26,11 @@ const MAX_SCROLLBACK = 120_000; // chars of terminal history kept per session
 
 let _seq = 0;
 const _sessions = new Map();
+
+// Base URL of the live admin server (set once it's listening, on its ACTUAL
+// port). The Claude approval bridge points the spawned MCP server back here.
+let _adminBase = null;
+export function setApprovalAdminBase(url) { _adminBase = url; }
 
 // xterm needs CRLF, not bare LF.
 const nl = (s) => String(s).replace(/\r?\n/g, '\r\n');
@@ -65,9 +72,14 @@ class Session {
                                      // `session.agent.chat(...)` ("…chat is not a function").
     this.prefs = null;               // owning user's prefs (provider/keys) for swarm + engine
     this.solo = false;               // when true, skip swarm even if it's the default
+    this.claudeAsk = false;          // when true, Claude turns run with interactive tool approval
+    this.approveAllow = new Set();   // tool names blessed "for this session" via the approval UI
     this._turnCancel = null;         // cancel fn for the in-flight turn (swarm or external agent)
     this.driver = null;              // { input(text, images, agentId), stop() }
   }
+
+  /** Push a structured (non-terminal) frame — e.g. a tool-approval request. */
+  emitApproval(frame) { this._push(frame); }
 
   /** Append terminal output and push it to every connected viewer. */
   write(text) {
@@ -110,6 +122,7 @@ class Session {
       id: this.id, name: this.name, cwd: this.cwd, origin: this.origin,
       status: this.status, createdAt: this.createdAt,
       agent: this.agentId || 'native',   // which agent answers (drives the UI dropdown)
+      claudeAsk: !!this.claudeAsk,        // per-chat: ask before Claude tool use
       messages: stats ? stats.messageCount : 0,
       toolCalls: stats ? stats.totalToolCalls : 0,
       contextPct: stats ? stats.pct : 0,
@@ -254,11 +267,29 @@ async function runWebExternal(session, agentId, text) {
   }
   session.write(`${A.grey}[via ${spec.name}]${A.reset}\r\n`);
 
-  const handle = runExternalAgent(agentId, text, {
+  const opts = {
     cwd: session.cwd,
     onText: (t) => session.write(t),
     onError: (e) => session.write(`\r\n${A.red}${e}${A.reset}\r\n`),
-  });
+  };
+
+  // Claude with per-chat approvals on: spin up an approval turn so the MCP
+  // bridge can broker each tool use back to this session. Needs the admin base
+  // (the bridge calls home over HTTP); without it we can't broker, so fall back
+  // to autonomous mode rather than stalling.
+  let turn = null;
+  if (agentId === 'claude' && session.claudeAsk) {
+    if (_adminBase) {
+      turn = crypto.randomUUID();
+      registerTurn(turn, session);
+      opts.claudeApproval = { adminBase: _adminBase, turn };
+      session.write(`${A.grey}[approval mode — you'll be asked before each new tool]${A.reset}\r\n`);
+    } else {
+      session.write(`${A.yellow}[approval mode unavailable here — running autonomously]${A.reset}\r\n`);
+    }
+  }
+
+  const handle = runExternalAgent(agentId, text, opts);
   // Let stopSession()/driver.stop() kill the subprocess mid-run.
   session._turnCancel = handle.cancel;
   try {
@@ -268,6 +299,7 @@ async function runWebExternal(session, agentId, text) {
     }
   } finally {
     session._turnCancel = null;
+    if (turn) unregisterTurn(turn);
   }
 }
 
@@ -306,6 +338,9 @@ export function createWebSession({ name, cwd, userId, prefs } = {}) {
   const agent = createAgent({ prefs });
   const session = new Session({ name, cwd, origin: 'web', agent, userId });
   session.prefs = prefs || null;
+  // New chats inherit the global Claude autonomy setting: approvals ON only when
+  // skip-permissions has been turned OFF. Toggle per chat in the session UI.
+  session.claudeAsk = getConfig().externalAgents?.claude?.skipPermissions === false;
   wireWebDriver(session);
   _sessions.set(session.id, session);
   session.write(`${A.green}${A.bold}● Mantis session "${session.name}"${A.reset}\r\n`);
@@ -345,6 +380,8 @@ function persist(session) {
       userId: session.userId,
       agentId: session.agentId,
       solo: session.solo,
+      claudeAsk: session.claudeAsk,
+      approveAllow: [...(session.approveAllow || [])],
       createdAt: session.createdAt,
       scrollback: session.scrollback,
       // Native engine history. Swarm/external turns don't populate this, but the
@@ -393,6 +430,8 @@ export function restoreSessions() {
         session.createdAt = data.createdAt || session.createdAt;
         session.agentId = data.agentId || null;
         session.solo = !!data.solo;
+        session.claudeAsk = !!data.claudeAsk;
+        session.approveAllow = new Set(Array.isArray(data.approveAllow) ? data.approveAllow : []);
         session.prefs = prefs;
         session.scrollback = data.scrollback || '';
         wireWebDriver(session);
@@ -411,6 +450,15 @@ export function setSessionAgent(id, agentId) {
   const session = _sessions.get(id);
   if (!session) return false;
   session.agentId = agentId === 'native' ? null : agentId;
+  persist(session);
+  return true;
+}
+
+/** Per-chat toggle: ask before each Claude tool use (vs. full autonomy). */
+export function setSessionClaudeAsk(id, ask) {
+  const session = _sessions.get(id);
+  if (!session) return false;
+  session.claudeAsk = !!ask;
   persist(session);
   return true;
 }
