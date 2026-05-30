@@ -1,6 +1,36 @@
 import chalk from 'chalk';
 import os from 'os';
 import path from 'path';
+import { createRequire } from 'module';
+
+// Base the require on execPath (an absolute path) rather than import.meta.url —
+// resolving a builtin like node:sea doesn't depend on the base, and this avoids
+// any import.meta quirks once the code is esbuild-bundled into the SEA exe.
+const _require = createRequire(process.execPath);
+
+/** True when running inside a Node Single Executable Application (the .exe build). */
+export function isSea() {
+  try { return _require('node:sea').isSea(); }
+  catch { return false; }
+}
+
+/**
+ * Build { command, args } to re-invoke Mantis with a subcommand, correctly in
+ * BOTH the single-exe build and a dev/node checkout. Used to spawn helper
+ * processes (e.g. the Claude approval bridge) without assuming `node` + a script
+ * path — under SEA, process.execPath is mantis.exe, not node.
+ */
+export function selfSpawn(subArgs = []) {
+  const extra = Array.isArray(subArgs) ? subArgs : [subArgs];
+  if (isSea()) {
+    // The exe IS Mantis — just pass the subcommand.
+    return { command: process.execPath, args: [...extra] };
+  }
+  // dev: node <entry script> <subcmd…>. process.argv[1] is the bin/mantis.js
+  // that node is already running, so re-spawning it with a new subcommand is
+  // exact (and avoids import.meta, which esbuild can't honor in the SEA bundle).
+  return { command: process.execPath, args: [process.argv[1], ...extra].filter(Boolean) };
+}
 
 /**
  * process.env with common user bin dirs appended to PATH. When Mantis runs as a

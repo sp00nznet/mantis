@@ -11,6 +11,8 @@ function printUsage() {
     mantis run "<task>"      Run one task headlessly (for scripts / CI)
     mantis serve             Start the Anthropic-compatible proxy server
     mantis admin             Start the admin web UI
+    mantis service <cmd>     Install/run the admin server at boot (Windows/Linux)
+                             cmd: install | uninstall | start | stop | status
     mantis bot telegram      Run the Telegram bot
     mantis bot discord       Run the Discord bot
     mantis auth admin <u> <p>  Create/reset the admin account and enable sign-in
@@ -146,6 +148,21 @@ async function main() {
         console.log(`  Sign-in is ${on ? 'ENABLED' : 'disabled'} — ${accounts.accountCount()} account(s).`);
         console.log('  Usage: mantis auth <admin <user> <pass> | disable | list>');
       }
+      break;
+    }
+
+    case 'approval-bridge': {
+      // Internal: the Claude tool-approval MCP bridge. Launched by Mantis itself
+      // (see external-agents.selfSpawn) with MANTIS_APPROVAL_URL / MANTIS_TURN in
+      // env. Speaks JSON-RPC over stdio — must NOT write anything else to stdout.
+      const { runApprovalBridge } = await import('../src/approval-bridge.js');
+      runApprovalBridge();
+      break;
+    }
+
+    case 'service': {
+      const { runServiceCommand } = await import('../src/service.js');
+      await runServiceCommand(process.argv.slice(3));
       break;
     }
 

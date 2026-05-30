@@ -2,7 +2,15 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-const CONFIG_DIR = path.join(os.homedir(), '.mantis');
+// Data directory. Defaults to ~/.mantis, but MANTIS_HOME (or MANTIS_DATA_DIR)
+// relocates it. Essential for running as a Windows service: under LocalSystem,
+// os.homedir() resolves to C:\Windows\System32\config\systemprofile — set
+// MANTIS_HOME to a real path (e.g. C:\ProgramData\Mantis) so config, sessions,
+// and per-user data land somewhere sane and ACL-able.
+const DATA_DIR_OVERRIDE = (process.env.MANTIS_HOME || process.env.MANTIS_DATA_DIR || '').trim();
+const CONFIG_DIR = DATA_DIR_OVERRIDE
+  ? path.resolve(DATA_DIR_OVERRIDE)
+  : path.join(os.homedir(), '.mantis');
 const OLD_CONFIG_DIR = path.join(os.homedir(), '.qwen-local');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const CONVERSATIONS_DIR = path.join(CONFIG_DIR, 'conversations');
@@ -463,6 +471,9 @@ function ensureDirs() {
  * Copies config, conversations, memory, and skills if old dir exists.
  */
 function migrateOldConfig() {
+  // An explicit data dir (service deployments) is opt-in and self-contained —
+  // don't drag the legacy ~/.qwen-local into it.
+  if (DATA_DIR_OVERRIDE) return;
   if (!fs.existsSync(OLD_CONFIG_DIR)) return;
   if (fs.existsSync(CONFIG_FILE)) return; // already migrated
 

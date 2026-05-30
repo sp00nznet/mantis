@@ -15,11 +15,8 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { getConfig } from './config.js';
-import { augmentedEnv } from './utils.js';
-
-const APPROVAL_MCP_SCRIPT = fileURLToPath(new URL('../scripts/claude-approval-mcp.mjs', import.meta.url));
+import { augmentedEnv, selfSpawn } from './utils.js';
 
 /**
  * Build the Claude permission flags for one run.
@@ -31,11 +28,14 @@ const APPROVAL_MCP_SCRIPT = fileURLToPath(new URL('../scripts/claude-approval-mc
 function claudePermissionArgs(opts) {
   if (opts.claudeApproval) {
     const { adminBase, turn } = opts.claudeApproval;
+    // Re-invoke Mantis itself as the MCP bridge — works as the single exe AND in
+    // a node checkout (selfSpawn handles both; under SEA there's no `node` + .mjs).
+    const { command, args } = selfSpawn('approval-bridge');
     const mcpConfig = JSON.stringify({
       mcpServers: {
         mantis: {
-          command: process.execPath,
-          args: [APPROVAL_MCP_SCRIPT],
+          command,
+          args,
           env: {
             MANTIS_APPROVAL_URL: `${adminBase}/api/approval/request`,
             MANTIS_TURN: turn,

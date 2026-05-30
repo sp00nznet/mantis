@@ -18,6 +18,7 @@ Guides for using and understanding Mantis. New here? Start with
 - [MCP Servers](mcp.md) — connect MCP servers to add tools to the agent
 - [Session Sharing](sharing.md) — watch/join links for a live session
 - [Sign-in & Multi-user](auth.md) — local accounts, roles, per-account workspaces
+- [Windows Server Deployment](windows-server.md) — single-exe, run-as-service, remote GPU
 - [Chat Bots](bots.md) — drive Mantis from Telegram or Discord
 - [Plan Mode](plan-mode.md) — read-only exploration
 - [Skills](skills.md) — built-in and custom slash commands
