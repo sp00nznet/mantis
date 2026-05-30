@@ -392,6 +392,18 @@
         <label>Swarm pool — unchecked providers are excluded</label>
         <div id="setPool" class="pool-grid"></div>
       </section>
+      <section class="card" id="cardExternalAgents">
+        <h2>External Agents</h2>
+        <div class="hint" style="margin-bottom:10px">
+          Claude Code runs autonomously inside a session (there's no terminal to approve its
+          tool use at). Turn this off to make it respect its normal permission prompts — note it
+          will then pause on the first tool that needs approval, which can stall the session.
+        </div>
+        <div class="check">
+          <input type="checkbox" id="setClaudeSkipPerms">
+          <label for="setClaudeSkipPerms" style="margin:0">Claude Code — skip permission prompts (full autonomy)</label>
+        </div>
+      </section>
       <div class="row" id="saveSettingsRow" style="margin-bottom:16px"><div></div><button onclick="saveSettings()">Save settings</button></div>
       <section class="card">
         <h2>Theme</h2>
@@ -742,6 +754,8 @@ function renderConfig() {
       '> ' + p.key + '</label>';
   });
   document.getElementById('setPool').innerHTML = pool;
+  var ea = STATE.externalAgents || {};
+  document.getElementById('setClaudeSkipPerms').checked = ea.claudeSkipPermissions !== false;
   renderThemePicker();
 
   document.getElementById('sideFoot').innerHTML = STATE.activeProvider;
@@ -1018,6 +1032,9 @@ function saveSettings() {
       maxParallelWorkers: parseInt(document.getElementById('setWorkers').value, 10),
       bestOfN: parseInt(document.getElementById('setBestOfN').value, 10),
       excludeProviders: exclude
+    },
+    externalAgents: {
+      claudeSkipPermissions: document.getElementById('setClaudeSkipPerms').checked
     }
   }).then(function(r){ done(r, 'Settings saved'); });
 }

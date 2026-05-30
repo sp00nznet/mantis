@@ -144,6 +144,10 @@ function buildState(req) {
       leadProvider: config.swarm?.leadProvider ?? null,
       excludeProviders: config.swarm?.excludeProviders ?? [],
     },
+    externalAgents: {
+      // Claude Code runs with --dangerously-skip-permissions unless disabled.
+      claudeSkipPermissions: config.externalAgents?.claude?.skipPermissions !== false,
+    },
     admin: {
       port: config.admin?.port ?? 8788,
       host: config.admin?.host ?? '127.0.0.1',
@@ -649,6 +653,12 @@ async function handleApi(req, res, url) {
         swarm.excludeProviders = body.swarm.excludeProviders.filter(k => PROVIDERS[k]);
       }
       updates.swarm = swarm;
+    }
+    if (body.externalAgents && typeof body.externalAgents === 'object'
+        && typeof body.externalAgents.claudeSkipPermissions === 'boolean') {
+      const ea = { ...config.externalAgents };
+      ea.claude = { ...(ea.claude || {}), skipPermissions: body.externalAgents.claudeSkipPermissions };
+      updates.externalAgents = ea;
     }
     saveConfig(updates);
     return sendJson(res, 200, { ok: true });

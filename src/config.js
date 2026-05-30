@@ -211,6 +211,19 @@ const DEFAULTS = {
     providerModels: {},       // override default models per provider: { groq: 'llama-3.3-70b', local: 'qwen2.5-coder:14b' }
     minPoolSize: 2,           // if fewer than this many providers have keys, fall back to solo silently
   },
+  // Delegation to external agentic CLIs (claude/codex/…). Per-agent overrides
+  // live under their id (bin, enabled, disabled, extraArgs, env). See
+  // src/external-agents.js.
+  externalAgents: {
+    inactivityTimeoutMs: 180000, // kill an external agent that emits no output for this long (0 = never)
+    claude: {
+      // Launch Claude Code with --dangerously-skip-permissions so it runs
+      // autonomously (no terminal to approve tool use at in a session). Turn
+      // this off to make Claude respect its normal permission prompts — note it
+      // will then stall on the first tool that needs approval.
+      skipPermissions: true,
+    },
+  },
   // Provider failover — when a provider keeps erroring (5xx/429/quota), rotate
   // to the next one in the chain instead of giving up. Cascades down the list
   // and wraps back to the top. A provider that just failed is skipped for
@@ -293,7 +306,7 @@ export function loadConfig() {
       config = { ...DEFAULTS, ...saved };
       // Deep-merge nested config objects so new default keys survive an old
       // config.json that predates them (shallow spread would drop them).
-      for (const k of ['swarm', 'proxy', 'bots', 'transcription', 'hooks', 'imageGen', 'speech', 'admin', 'auth', 'google', 'localUrls', 'failover']) {
+      for (const k of ['swarm', 'proxy', 'bots', 'transcription', 'hooks', 'imageGen', 'speech', 'admin', 'auth', 'google', 'localUrls', 'failover', 'externalAgents']) {
         config[k] = { ...DEFAULTS[k], ...(saved[k] || {}) };
       }
       config.proxy.routes = { ...DEFAULTS.proxy.routes, ...(saved.proxy?.routes || {}) };

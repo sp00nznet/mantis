@@ -30,14 +30,18 @@ const AGENT_REGISTRY = {
     name: 'Claude Code',
     bin: 'claude',
     // --dangerously-skip-permissions: there is no terminal to approve tool use
-    // at in a Mantis session, so without this Claude hangs forever waiting for
-    // permission. This matches Mantis's own web sessions (which auto-approve
-    // every tool) and the yolo flags the other delegated CLIs use. Safe here:
-    // the box runs as a non-root user; Claude refuses the flag as root anyway.
-    spawn: (prompt) => ({
-      args: ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'],
-      stdinMode: 'none',
-    }),
+    // at in a Mantis session, so without it Claude hangs forever waiting for
+    // permission. On by default (matches Mantis's auto-approving web sessions
+    // and the other CLIs' yolo flags); toggle via
+    // config.externalAgents.claude.skipPermissions (Settings → External Agents).
+    // Safe here: the box runs as a non-root user; Claude refuses the flag as root.
+    spawn: (prompt) => {
+      const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose'];
+      if (getConfig().externalAgents?.claude?.skipPermissions !== false) {
+        args.push('--dangerously-skip-permissions');
+      }
+      return { args, stdinMode: 'none' };
+    },
     parseStream: 'claude-stream-json',
     risk: 'medium',                       // respects .claude/settings.json denies
     streams: true,
