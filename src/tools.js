@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { exec, execSync } from 'child_process';
-import { truncate } from './utils.js';
+import { truncate, augmentedEnv } from './utils.js';
 import { getConfig } from './config.js';
 import { recordChange } from './checkpoints.js';
 import { webFetch, webSearch } from './web.js';
@@ -251,6 +251,7 @@ function runCommand({ command, cwd }) {
       maxBuffer: 2 * 1024 * 1024,
       shell: true,
       windowsHide: true,
+      env: augmentedEnv(), // include ~/.local/bin etc. so service-launched mantis finds user tools
     }, (err, stdout, stderr) => {
       const maxResult = getConfig().maxToolResultSize || 8000;
       if (err) {

@@ -49,6 +49,18 @@ export function userSessionsDir(userId) {
   return d;
 }
 
+/**
+ * Directory for live hub/terminal sessions (the admin Sessions tab). Kept
+ * SEPARATE from `sessions/` — that one holds the desktop app's chat history
+ * (desktop/store.js) with a different file shape, and mixing them would make
+ * restore adopt foreign files.
+ */
+export function userHubSessionsDir(userId) {
+  const d = path.join(userId ? userDir(userId) : getConfigDir(), 'hub-sessions');
+  if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+  return d;
+}
+
 const prefsFile = (userId) => path.join(userDir(userId), 'prefs.json');
 
 /**

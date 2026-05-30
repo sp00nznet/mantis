@@ -25,6 +25,7 @@ import { getConfig, saveConfig, PROVIDERS } from './config.js';
 import { getWorkingDirectory } from './tools.js';
 import {
   listSessions, getSession, createWebSession, removeSession, sendInput, stopSession,
+  setSessionAgent, restoreSessions,
 } from './sessions.js';
 import * as auth from './auth.js';
 import * as users from './users.js';
@@ -366,9 +367,10 @@ async function handleSessionApi(req, res, parts) {
     const body = await readJson(req);
     const agentId = body.agentId ? String(body.agentId) : '';
     if (!agentId) return sendJson(res, 400, { error: 'agentId is required' });
-    // Store the selected external CLI as the session DEFAULT. Never assign to
-    // session.agent — that holds the engine object runWeb calls .chat() on.
-    session.agentId = agentId === 'native' ? null : agentId;
+    // Store the selected external CLI as the session DEFAULT (persisted). Never
+    // assign to session.agent — that holds the engine object runWeb calls
+    // .chat() on. setSessionAgent writes to session.agentId and checkpoints.
+    setSessionAgent(id, agentId);
     return sendJson(res, 200, { ok: true, agent: agentId });
   }
   if (action === 'stop' && req.method === 'POST') {
@@ -772,6 +774,9 @@ export async function handleAdminRequest(req, res) {
  */
 export function startAdmin({ port, host } = {}) {
   const config = getConfig();
+  // Rehydrate any hub sessions persisted before the last shutdown/redeploy so
+  // users don't have to reopen their chats every time.
+  try { restoreSessions(); } catch { /* non-fatal — start with an empty hub */ }
   const wantPort = port || config.admin?.port || 8788;
   // With sign-in on, bind to all interfaces so other devices can reach it.
   const listenHost = host || (auth.isAuthEnabled() ? '0.0.0.0' : (config.admin?.host || '127.0.0.1'));

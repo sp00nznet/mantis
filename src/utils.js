@@ -1,4 +1,32 @@
 import chalk from 'chalk';
+import os from 'os';
+import path from 'path';
+
+/**
+ * process.env with common user bin dirs appended to PATH. When Mantis runs as a
+ * service/daemon its PATH is the minimal system one, so user-installed tools
+ * (pipx/npm-global/cargo in ~/.local/bin, Homebrew, etc.) aren't found —
+ * `flake8: not found` (exit 127) despite being installed. We APPEND (not
+ * prepend) the missing dirs so system binaries still win; only gaps are filled.
+ * Used by the run_command tool and external-agent spawns.
+ */
+export function augmentedEnv(extra = {}) {
+  const home = os.homedir();
+  const candidates = process.platform === 'win32'
+    ? [path.join(home, '.local', 'bin')]
+    : [
+        path.join(home, '.local', 'bin'),
+        path.join(home, 'bin'),
+        '/usr/local/bin',
+        '/opt/homebrew/bin',
+        '/usr/bin',
+        '/bin',
+      ];
+  const cur = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  const seen = new Set(cur);
+  for (const d of candidates) if (!seen.has(d)) { cur.push(d); seen.add(d); }
+  return { ...process.env, ...extra, PATH: cur.join(path.delimiter) };
+}
 
 export const colors = {
   toolName: chalk.cyan.bold,

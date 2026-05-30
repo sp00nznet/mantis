@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { getConfig } from './config.js';
+import { augmentedEnv } from './utils.js';
 
 // ─── Registry ───────────────────────────────────────────────────────
 // `spawn(prompt, cwd)` returns { args, stdinMode }. stdinMode = 'none' means
@@ -28,8 +29,13 @@ const AGENT_REGISTRY = {
   claude: {
     name: 'Claude Code',
     bin: 'claude',
+    // --dangerously-skip-permissions: there is no terminal to approve tool use
+    // at in a Mantis session, so without this Claude hangs forever waiting for
+    // permission. This matches Mantis's own web sessions (which auto-approve
+    // every tool) and the yolo flags the other delegated CLIs use. Safe here:
+    // the box runs as a non-root user; Claude refuses the flag as root anyway.
     spawn: (prompt) => ({
-      args: ['-p', prompt, '--output-format', 'stream-json', '--verbose'],
+      args: ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'],
       stdinMode: 'none',
     }),
     parseStream: 'claude-stream-json',
@@ -200,13 +206,29 @@ export function runExternalAgent(id, prompt, opts = {}) {
   const startTime = Date.now();
   const proc = spawn(command, finalArgs, {
     cwd: opts.cwd,
-    env: { ...process.env, ...(spec.env || {}) },
+    env: { ...augmentedEnv(), ...(spec.env || {}) }, // user bin dirs on PATH for the agent's own shell-outs
     stdio: [stdinMode === 'pipe' ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
 
   let cancelled = false;
+  let timedOut = false;
   let stderrBuf = '';
+
+  // Inactivity watchdog: if the agent emits no stdout/stderr for this long it's
+  // assumed wedged (e.g. blocked on a prompt) and killed — otherwise a hung
+  // subprocess pins the session on 'running' forever and bricks it. Any output
+  // resets the timer, so long-but-active builds are never cut off. 0 disables.
+  const inactivityMs = opts.inactivityMs
+    ?? getConfig().externalAgents?.inactivityTimeoutMs
+    ?? 180_000;
+  let idleTimer = null;
+  const bumpIdle = () => {
+    if (!inactivityMs) return;
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => { timedOut = true; killProc(proc); }, inactivityMs);
+  };
+  bumpIdle();
 
   if (stdinMode === 'pipe') {
     proc.stdin.write(prompt);
@@ -218,6 +240,7 @@ export function runExternalAgent(id, prompt, opts = {}) {
   if (spec.parseStream === 'claude-stream-json') {
     let buf = '';
     proc.stdout.on('data', (chunk) => {
+      bumpIdle();
       buf += chunk.toString('utf8');
       let idx;
       while ((idx = buf.indexOf('\n')) >= 0) {
@@ -237,11 +260,12 @@ export function runExternalAgent(id, prompt, opts = {}) {
       }
     });
   } else {
-    proc.stdout.on('data', (chunk) => onText(chunk.toString('utf8')));
+    proc.stdout.on('data', (chunk) => { bumpIdle(); onText(chunk.toString('utf8')); });
   }
 
   // ── stderr ──
   proc.stderr.on('data', (chunk) => {
+    bumpIdle();
     stderrBuf += chunk.toString('utf8');
     // Don't surface raw stderr unless the agent exits non-zero.
   });
@@ -260,7 +284,15 @@ export function runExternalAgent(id, prompt, opts = {}) {
   // ── exit ──
   const promise = new Promise((resolve) => {
     proc.on('exit', (code, signal) => {
+      if (idleTimer) clearTimeout(idleTimer);
       const durationMs = Date.now() - startTime;
+      if (timedOut) {
+        const secs = Math.round(inactivityMs / 1000);
+        const err = `no output for ${secs}s — killed (likely blocked on a prompt; agent runs non-interactively)`;
+        if (opts.onError) opts.onError(err);
+        resolve({ ok: false, exitCode: code, signal, durationMs, error: err });
+        return;
+      }
       if (cancelled) {
         resolve({ ok: false, exitCode: code, signal, durationMs, error: 'cancelled' });
         return;
@@ -279,6 +311,7 @@ export function runExternalAgent(id, prompt, opts = {}) {
       }
     });
     proc.on('error', (err) => {
+      if (idleTimer) clearTimeout(idleTimer);
       resolve({ ok: false, exitCode: null, durationMs: Date.now() - startTime, error: err.message });
     });
   });
