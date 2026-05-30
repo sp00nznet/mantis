@@ -366,7 +366,9 @@ async function handleSessionApi(req, res, parts) {
     const body = await readJson(req);
     const agentId = body.agentId ? String(body.agentId) : '';
     if (!agentId) return sendJson(res, 400, { error: 'agentId is required' });
-    session.agent = agentId;
+    // Store the selected external CLI as the session DEFAULT. Never assign to
+    // session.agent — that holds the engine object runWeb calls .chat() on.
+    session.agentId = agentId === 'native' ? null : agentId;
     return sendJson(res, 200, { ok: true, agent: agentId });
   }
   if (action === 'stop' && req.method === 'POST') {

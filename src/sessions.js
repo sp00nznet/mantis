@@ -11,6 +11,7 @@
  */
 
 import { createAgent } from './agent.js';
+import { runExternalAgent, resolveAgentSpec } from './external-agents.js';
 import { setWorkingDirectory, getWorkingDirectory } from './tools.js';
 import { truncate } from './utils.js';
 
@@ -52,8 +53,13 @@ class Session {
     this.status = 'idle';            // 'idle' | 'running'
     this.scrollback = '';            // terminal history (replayed to new viewers)
     this.subscribers = new Set();    // SSE response objects
-    this.agent = agent || null;
-    this.driver = null;              // { input(text), stop() }
+    this.agent = agent || null;      // the built-in Mantis engine (createAgent)
+    this.agentId = null;             // selected external CLI id ('claude'…) or null = native.
+                                     // MUST stay separate from `this.agent`: clobbering the
+                                     // engine object with an id string broke runWeb's
+                                     // `session.agent.chat(...)` ("…chat is not a function").
+    this._externalCancel = null;     // cancel fn for an in-flight external-agent turn
+    this.driver = null;              // { input(text, images, agentId), stop() }
   }
 
   /** Append terminal output and push it to every connected viewer. */
@@ -96,6 +102,7 @@ class Session {
     return {
       id: this.id, name: this.name, cwd: this.cwd, origin: this.origin,
       status: this.status, createdAt: this.createdAt,
+      agent: this.agentId || 'native',   // which agent answers (drives the UI dropdown)
       messages: stats ? stats.messageCount : 0,
       toolCalls: stats ? stats.totalToolCalls : 0,
       contextPct: stats ? stats.pct : 0,
@@ -107,7 +114,7 @@ class Session {
 
 // ─── Web-session runner ─────────────────────────────────────────────
 
-async function runWeb(session, text, images) {
+async function runWeb(session, text, images, agentId) {
   if (session.status === 'running') {
     session.write(`${A.yellow}[busy — wait for the current task to finish]${A.reset}\r\n`);
     return;
@@ -119,27 +126,69 @@ async function runWeb(session, text, images) {
   const imgNote = images && images.length ? ` ${A.grey}[+${images.length} image]${A.reset}` : '';
   session.write(`${A.blue}${A.bold}❯ ${text}${A.reset}${imgNote}\r\n`);
 
+  // Which agent answers this turn: per-turn override (UI dropdown on /input)
+  // wins, else the session default, else the built-in Mantis engine. Anything
+  // other than 'native' is an external CLI (claude/codex/…) spawned per turn.
+  const turnAgent = (agentId && agentId !== 'native') ? agentId
+                  : (session.agentId && session.agentId !== 'native') ? session.agentId
+                  : null;
+
   try {
-    await session.agent.chat(text, {
-      maxLoops: 50,
-      images,
-      onText: (t) => session.write(t),
-      onToolCall: (name, args) =>
-        session.write(`${A.cyan}⚙ ${name}${A.reset} ${A.grey}${fmtArgs(args)}${A.reset}\r\n`),
-      onToolResult: (name, result) =>
-        session.write(`${A.dim}${truncate(String(result), 500)}${A.reset}\r\n`),
-      onError: (e) => session.write(`\r\n${A.red}${e}${A.reset}\r\n`),
-      onConfirmToolCall: async () => true, // no terminal to confirm at — auto-approve
-      onThinking: () => {},
-      onToken: () => {},
-      onCompact: (b, a) => session.write(`${A.yellow}[context compacted ${b}→${a}]${A.reset}\r\n`),
-    });
+    if (turnAgent) {
+      await runWebExternal(session, turnAgent, text);
+    } else {
+      await session.agent.chat(text, {
+        maxLoops: 50,
+        images,
+        onText: (t) => session.write(t),
+        onToolCall: (name, args) =>
+          session.write(`${A.cyan}⚙ ${name}${A.reset} ${A.grey}${fmtArgs(args)}${A.reset}\r\n`),
+        onToolResult: (name, result) =>
+          session.write(`${A.dim}${truncate(String(result), 500)}${A.reset}\r\n`),
+        onError: (e) => session.write(`\r\n${A.red}${e}${A.reset}\r\n`),
+        onConfirmToolCall: async () => true, // no terminal to confirm at — auto-approve
+        onThinking: () => {},
+        onToken: () => {},
+        onCompact: (b, a) => session.write(`${A.yellow}[context compacted ${b}→${a}]${A.reset}\r\n`),
+      });
+    }
   } catch (e) {
     session.write(`\r\n${A.red}Error: ${e.message}${A.reset}\r\n`);
   }
 
   session.setStatus('idle');
   session.write('\r\n');
+}
+
+/**
+ * Spawn an external agentic CLI (claude/codex/…) for one hub-session turn and
+ * stream its stdout into the session's terminal. External agents are stateless
+ * passthroughs — they don't touch the built-in engine's history; the scrollback
+ * is the record of the turn.
+ */
+async function runWebExternal(session, agentId, text) {
+  const spec = resolveAgentSpec(agentId);
+  if (!spec || !spec.available) {
+    session.write(`${A.red}External agent "${agentId}" is not available — install it or enable it in Settings → External Agents.${A.reset}\r\n`);
+    return;
+  }
+  session.write(`${A.grey}[via ${spec.name}]${A.reset}\r\n`);
+
+  const handle = runExternalAgent(agentId, text, {
+    cwd: session.cwd,
+    onText: (t) => session.write(t),
+    onError: (e) => session.write(`\r\n${A.red}${e}${A.reset}\r\n`),
+  });
+  // Let stopSession()/driver.stop() kill the subprocess mid-run.
+  session._externalCancel = handle.cancel;
+  try {
+    const result = await handle.promise;
+    if (!result.ok && result.error && result.error !== 'cancelled') {
+      session.write(`\r\n${A.red}${spec.name} failed: ${result.error}${A.reset}\r\n`);
+    }
+  } finally {
+    session._externalCancel = null;
+  }
 }
 
 // ─── Hub API ────────────────────────────────────────────────────────
@@ -164,8 +213,12 @@ export function createWebSession({ name, cwd, userId, prefs } = {}) {
   const agent = createAgent({ prefs });
   const session = new Session({ name, cwd, origin: 'web', agent, userId });
   session.driver = {
-    input: (text, images) => runWeb(session, text, images),
-    stop: () => agent.cancel(),
+    input: (text, images, agentId) => runWeb(session, text, images, agentId),
+    stop: () => {
+      // Cancel whichever is running: an external-agent subprocess or the engine.
+      try { session._externalCancel?.(); } catch { /* ignore */ }
+      agent.cancel();
+    },
   };
   _sessions.set(session.id, session);
   session.write(`${A.green}${A.bold}● Mantis session "${session.name}"${A.reset}\r\n`);
