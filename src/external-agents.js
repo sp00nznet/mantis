@@ -230,10 +230,13 @@ export function runExternalAgent(id, prompt, opts = {}) {
   // bridge) are decided per call, not baked into the registry spawn().
   if (id === 'claude') finalArgs.push(...claudePermissionArgs(opts));
 
-  // Windows .cmd shim handling — same pattern as src/mcp.js _spawnStdio.
+  // Windows .cmd shim handling — same pattern as src/mcp.js _spawnStdio. Use the
+  // absolute path to cmd.exe (ComSpec), not bare 'cmd': as a service/Scheduled
+  // Task the inherited PATH may not include System32, which made the launch fail
+  // with "spawn cmd ENOENT".
   if (process.platform === 'win32') {
     finalArgs = ['/c', command, ...finalArgs];
-    command = 'cmd';
+    command = process.env.ComSpec || 'cmd.exe';
   }
 
   const startTime = Date.now();

@@ -62,10 +62,12 @@ class McpServer {
     let command = this.spec.command;
     let args = this.spec.args || [];
     // Route through `cmd /c` on Windows so `.cmd` shims (npx, npm) resolve on
-    // PATH — without shell:true, which escapes args poorly (DEP0190).
+    // PATH — without shell:true, which escapes args poorly (DEP0190). Use the
+    // absolute ComSpec, not bare 'cmd', so it still resolves under a service's
+    // minimal PATH (otherwise "spawn cmd ENOENT").
     if (process.platform === 'win32') {
       args = ['/c', command, ...args];
-      command = 'cmd';
+      command = process.env.ComSpec || 'cmd.exe';
     }
     const proc = spawn(command, args, {
       env,

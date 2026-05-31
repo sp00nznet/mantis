@@ -42,16 +42,31 @@ export function selfSpawn(subArgs = []) {
  */
 export function augmentedEnv(extra = {}) {
   const home = os.homedir();
-  const candidates = process.platform === 'win32'
-    ? [path.join(home, '.local', 'bin')]
-    : [
-        path.join(home, '.local', 'bin'),
-        path.join(home, 'bin'),
-        '/usr/local/bin',
-        '/opt/homebrew/bin',
-        '/usr/bin',
-        '/bin',
-      ];
+  let candidates;
+  if (process.platform === 'win32') {
+    // Under a service/Scheduled Task the inherited PATH can be minimal — make
+    // sure the Windows system dirs (cmd.exe, where.exe, powershell) and the npm
+    // global prefix are present so agents and their shell-outs resolve.
+    const sysRoot = process.env.SystemRoot || 'C:\\Windows';
+    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    candidates = [
+      path.join(sysRoot, 'System32'),
+      sysRoot,
+      path.join(sysRoot, 'System32', 'WindowsPowerShell', 'v1.0'),
+      path.join(home, '.local', 'bin'),
+      path.join(appData, 'npm'),                                  // npm -g shims (claude.cmd, codex.cmd)
+      path.join(home, 'AppData', 'Local', 'Microsoft', 'WindowsApps'),
+    ];
+  } else {
+    candidates = [
+      path.join(home, '.local', 'bin'),
+      path.join(home, 'bin'),
+      '/usr/local/bin',
+      '/opt/homebrew/bin',
+      '/usr/bin',
+      '/bin',
+    ];
+  }
   const cur = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
   const seen = new Set(cur);
   for (const d of candidates) if (!seen.has(d)) { cur.push(d); seen.add(d); }
