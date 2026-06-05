@@ -15,7 +15,8 @@ Guides for using and understanding Mantis. New here? Start with
 
 - [Swarm Mode](swarm.md) — run every provider in parallel
 - [Proxy & Admin UI](proxy.md) — use Mantis as a Claude Code backend
-- [MCP Servers](mcp.md) — connect MCP servers to add tools to the agent
+- [MCP](mcp.md) — connect MCP servers, or run Mantis as one
+- [Conversation Search](search.md) — full-text recall across past sessions
 - [Session Sharing](sharing.md) — watch/join links for a live session
 - [Sign-in & Multi-user](auth.md) — local accounts, roles, per-account workspaces
 - [Windows Server Deployment](windows-server.md) — single-exe, run-as-service, remote GPU
@@ -28,6 +29,6 @@ Guides for using and understanding Mantis. New here? Start with
 
 ## Internals
 
-- [Tools](tools.md) — the 15 built-in tools the model can call
+- [Tools](tools.md) — the 17 built-in tools the model can call
 - [Architecture](architecture.md) — how Mantis works under the hood
 - [CI/CD](cicd.md) — GitLab pipeline, single-exe CLI, desktop installers

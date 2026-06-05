@@ -72,6 +72,10 @@ export function createBotSession() {
     isBusy: () => busy,
     stats: () => agent.getStats(),
     setCwd,
+    // History accessors — used by the gateway to persist/restore a session
+    // across restarts.
+    getMessages: () => (agent.getMessages ? agent.getMessages() : []),
+    setMessages: (m) => { if (agent.setMessages && Array.isArray(m)) agent.setMessages(m); },
   };
 }
 

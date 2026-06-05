@@ -272,6 +272,10 @@ Copy the JSON, send it to someone, and they save it as `~/.mantis/skills/deploy.
 
 ## Skill File Format
 
+Mantis reads two on-disk formats, side by side. Use whichever you like.
+
+### 1. JSON (Mantis-native)
+
 Each skill is a single JSON file:
 
 ```json
@@ -291,6 +295,53 @@ Each skill is a single JSON file:
 | `prompt` | Yes | The prompt template with optional `{{args}}` substitution |
 
 You can create skills by hand — just drop a `.json` file in the right directory.
+
+### 2. SKILL.md (agentskills.io / Claude Code)
+
+A skill can also be a **folder** containing a `SKILL.md` file with YAML
+frontmatter and a markdown body — the portable
+[agentskills.io](https://agentskills.io) standard that Claude Code also uses. This
+means you can share skills with that ecosystem, or drop a skill you got from it
+straight into Mantis.
+
+```
+~/.mantis/skills/deploy/
+└── SKILL.md
+```
+
+```markdown
+---
+name: deploy
+description: Deploy the current branch to staging
+argument-hint: "[environment]"
+---
+Deploy to {{#if args}}{{args}}{{else}}staging{{/if}}:
+1. Run the tests first — don't deploy broken code.
+2. Run "git push origin HEAD"
+3. Run "npm run deploy:{{#if args}}{{args}}{{else}}staging{{/if}}"
+4. Report the result.
+```
+
+The same `{{args}}` / `{{#if args}}` template language applies to the body. If the
+folder bundles extra files (scripts, templates, checklists), Mantis tells the
+agent where they are so the steps can reference them with `read_file`.
+
+---
+
+## Autonomous skill creation
+
+The agent can save a skill **itself** via the `create_skill` tool. When it works
+out a non-trivial, repeatable procedure — a build/release flow, a project-specific
+check, a multi-step task you're likely to want again — it can capture it as a skill
+instead of relearning it next time. You'll see something like:
+
+```
+> create_skill name=release scope=project
+  Saved skill "/release" (project scope) to .mantis/skills/release/SKILL.md.
+```
+
+Skills created this way are written in the portable SKILL.md format. Just ask:
+*"save that as a skill"* and the agent does the rest.
 
 ---
 

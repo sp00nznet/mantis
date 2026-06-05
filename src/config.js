@@ -282,6 +282,14 @@ const DEFAULTS = {
   // MCP (Model Context Protocol) servers — their tools are added to the agent.
   // stdio: { command, args, env }   ·   http: { url, headers }
   mcpServers: {},
+  // Chat-bot gateway. Idle bot conversations are evicted from memory after
+  // hibernateIdleMs and rehydrated from disk on their next message — keeps a
+  // long-running bot/server's footprint flat regardless of how many chats it
+  // has seen. Set to 0 to disable hibernation (keep every session resident).
+  gateway: {
+    hibernateIdleMs: 1800000, // 30 minutes
+    sweepIntervalMs: 300000,  // check every 5 minutes
+  },
   // Media generation tools. Provider keys come from providerKeys.
   imageGen: { provider: 'openai', model: 'gpt-image-1' },
   speech: { provider: 'openai', model: 'gpt-4o-mini-tts', voice: 'alloy' },
@@ -317,7 +325,7 @@ export function loadConfig() {
       config = { ...DEFAULTS, ...saved };
       // Deep-merge nested config objects so new default keys survive an old
       // config.json that predates them (shallow spread would drop them).
-      for (const k of ['swarm', 'proxy', 'bots', 'transcription', 'hooks', 'imageGen', 'speech', 'admin', 'auth', 'google', 'localUrls', 'failover', 'externalAgents']) {
+      for (const k of ['swarm', 'proxy', 'bots', 'transcription', 'hooks', 'imageGen', 'speech', 'admin', 'auth', 'google', 'localUrls', 'failover', 'externalAgents', 'gateway']) {
         config[k] = { ...DEFAULTS[k], ...(saved[k] || {}) };
       }
       config.proxy.routes = { ...DEFAULTS.proxy.routes, ...(saved.proxy?.routes || {}) };

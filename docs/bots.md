@@ -8,6 +8,9 @@ Each chat (Telegram) or channel (Discord) gets its own agent session with its ow
 conversation history. Tool calls are **auto-approved** — there's no terminal to
 confirm at, so a bot session behaves like autonomous mode.
 
+Conversations are owned by a shared **gateway** that persists them to disk and
+**survives bot restarts** — see [Session persistence & hibernation](#session-persistence--hibernation).
+
 ---
 
 ## Telegram
@@ -148,6 +151,41 @@ A request from anyone not on a non-empty list is refused.
 > The working directory is shared across all of a bot's sessions and with the
 > process it runs in. Run a bot from the project directory you want it to work
 > in, and only give the token to people you trust.
+
+---
+
+## Session persistence & hibernation
+
+Bot conversations are managed by a single **gateway**, keyed by
+`(platform, chat id)`. Two things follow from that:
+
+- **They persist.** Each conversation's history is checkpointed to
+  `<data-dir>/gateway-sessions/<platform>/<chat-id>.json` after every turn. If you
+  restart the bot (or redeploy), a chat picks up exactly where it left off the
+  next time it sends a message — no more wiping every thread on restart.
+- **Idle ones hibernate.** A conversation that's been quiet for a while is evicted
+  from memory and rebuilt from disk the next time it's used. A long-running bot
+  that's seen thousands of chats keeps a flat memory footprint instead of holding
+  an agent for every one.
+
+Tune it under `gateway` in `~/.mantis/config.json`:
+
+```json
+{
+  "gateway": {
+    "hibernateIdleMs": 1800000,
+    "sweepIntervalMs": 300000
+  }
+}
+```
+
+- `hibernateIdleMs` — evict a session after this many ms idle (default 30 min). Set
+  to `0` to disable hibernation and keep every session resident.
+- `sweepIntervalMs` — how often the idle sweep runs (default 5 min).
+
+A session is never evicted mid-turn, and its history is already on disk, so
+hibernation is lossless. Bot conversations are also indexed for
+[conversation search](search.md) (`bot chat` source).
 
 ---
 

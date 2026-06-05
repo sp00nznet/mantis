@@ -12,7 +12,8 @@
  */
 
 import { getConfig } from '../config.js';
-import { createBotSession, runBotCommand, formatResult, chunkMessage } from '../bot-core.js';
+import { runBotCommand, formatResult, chunkMessage } from '../bot-core.js';
+import { gatewaySession } from '../gateway.js';
 import { transcribeAudio } from '../transcribe.js';
 
 const DISCORD_LIMIT = 2000;
@@ -66,11 +67,9 @@ export async function startDiscordBot() {
   }
 
   // ─── Sessions ─────────────────────────────────────────────────────
-  const sessions = new Map(); // channelId -> session
-  function sessionFor(channelId) {
-    if (!sessions.has(channelId)) sessions.set(channelId, createBotSession());
-    return sessions.get(channelId);
-  }
+  // Persistent, gateway-owned sessions keyed by (platform, channelId). They
+  // survive a bot restart and rehydrate on the next message.
+  const sessionFor = (channelId) => gatewaySession('discord', channelId);
 
   let botUserId = null;
 

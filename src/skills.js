@@ -7,7 +7,13 @@
  * and variable substitution.
  *
  * Storage: ~/.mantis/skills/
- * Format:  One JSON file per skill.
+ * Two on-disk formats are supported, side by side:
+ *   1. JSON      — one <name>.json file (Mantis-native).
+ *   2. SKILL.md  — a <name>/ folder containing SKILL.md with YAML frontmatter
+ *                  (name, description, argument-hint) plus a markdown body. This
+ *                  is the agentskills.io / Claude Code standard, so skills can be
+ *                  shared with — or borrowed from — that ecosystem. The folder
+ *                  may bundle resource files the skill body references.
  *
  * Built-in skills ship with Mantis. User skills override built-ins
  * if they share the same name.
@@ -238,23 +244,61 @@ function getProjectSkillsDir() {
   return path.join(cwd, PROJECT_SKILLS_DIRNAME);
 }
 
+/**
+ * Parse YAML frontmatter from a SKILL.md file. Handles the simple `key: value`
+ * subset agentskills.io uses (quoted values stripped); the rest is the body.
+ */
+function parseFrontmatter(text) {
+  const m = /^﻿?---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text);
+  if (!m) return { meta: {}, body: text.trim() };
+  const meta = {};
+  for (const line of m[1].split(/\r?\n/)) {
+    const kv = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(line);
+    if (!kv) continue;
+    let val = kv[2].trim();
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    meta[kv[1].toLowerCase()] = val;
+  }
+  return { meta, body: (m[2] || '').trim() };
+}
+
 function loadSkillsFromDir(dir) {
   if (!fs.existsSync(dir)) return [];
   const skills = [];
+  let entries;
   try {
-    const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
-    for (const file of files) {
-      try {
-        const data = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf-8'));
-        if (data.name && data.prompt) {
-          skills.push(data);
-        }
-      } catch {
-        // skip broken files
-      }
-    }
+    entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch {
-    // dir unreadable
+    return []; // dir unreadable
+  }
+  for (const ent of entries) {
+    try {
+      if (ent.isDirectory()) {
+        // agentskills.io: <dir>/<name>/SKILL.md
+        const skillDir = path.join(dir, ent.name);
+        const skillFile = path.join(skillDir, 'SKILL.md');
+        if (!fs.existsSync(skillFile)) continue;
+        const { meta, body } = parseFrontmatter(fs.readFileSync(skillFile, 'utf-8'));
+        if (!body) continue;
+        skills.push({
+          name: (meta.name || ent.name).toLowerCase(),
+          description: meta.description || '',
+          args: meta['argument-hint'] || meta.args || '',
+          prompt: body,
+          dir: skillDir,
+          format: 'md',
+        });
+      } else if (ent.name.endsWith('.json')) {
+        const data = JSON.parse(fs.readFileSync(path.join(dir, ent.name), 'utf-8'));
+        if (data.name && data.prompt) {
+          skills.push({ ...data, format: 'json' });
+        }
+      }
+    } catch {
+      // skip broken files / folders
+    }
   }
   return skills;
 }
@@ -289,10 +333,27 @@ export function getSkill(name) {
   return all.find(s => s.name === name) || null;
 }
 
-export function saveSkill(skill, scope = 'user') {
+/**
+ * Persist a skill. format 'json' (default) keeps the Mantis-native file;
+ * format 'md' writes an agentskills.io folder (<name>/SKILL.md) so the skill is
+ * portable to Claude Code and the wider ecosystem.
+ */
+export function saveSkill(skill, scope = 'user', { format = 'json' } = {}) {
   const dir = scope === 'project' ? getProjectSkillsDir() : USER_SKILLS_DIR;
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
+  }
+
+  if (format === 'md') {
+    const skillDir = path.join(dir, sanitizeName(skill.name));
+    fs.mkdirSync(skillDir, { recursive: true });
+    const desc = (skill.description || '').replace(/\r?\n/g, ' ').trim();
+    const lines = ['---', `name: ${skill.name}`, `description: ${desc}`];
+    if (skill.args) lines.push(`argument-hint: ${skill.args}`);
+    lines.push('---', '', skill.prompt.trim(), '');
+    const filepath = path.join(skillDir, 'SKILL.md');
+    fs.writeFileSync(filepath, lines.join('\n'), 'utf-8');
+    return filepath;
   }
 
   const filename = `${sanitizeName(skill.name)}.json`;
@@ -311,11 +372,17 @@ export function saveSkill(skill, scope = 'user') {
 
 export function deleteSkill(name, scope = 'user') {
   const dir = scope === 'project' ? getProjectSkillsDir() : USER_SKILLS_DIR;
-  const filename = `${sanitizeName(name)}.json`;
-  const filepath = path.join(dir, filename);
+  const base = sanitizeName(name);
 
-  if (fs.existsSync(filepath)) {
-    fs.unlinkSync(filepath);
+  const jsonPath = path.join(dir, `${base}.json`);
+  if (fs.existsSync(jsonPath)) {
+    fs.unlinkSync(jsonPath);
+    return true;
+  }
+  // agentskills.io folder form
+  const folderPath = path.join(dir, base);
+  if (fs.existsSync(path.join(folderPath, 'SKILL.md'))) {
+    fs.rmSync(folderPath, { recursive: true, force: true });
     return true;
   }
   return false;
@@ -342,7 +409,22 @@ export function expandSkillPrompt(skill, argsStr) {
   // Substitute {{args}}
   prompt = prompt.replace(/\{\{args\}\}/g, argsStr || '');
 
-  return prompt.trim();
+  prompt = prompt.trim();
+
+  // For folder (SKILL.md) skills that bundle resource files, point the agent at
+  // them so the body can reference scripts/templates/etc. by name.
+  if (skill.dir) {
+    try {
+      const extras = fs.readdirSync(skill.dir).filter(f => f !== 'SKILL.md');
+      if (extras.length) {
+        prompt += `\n\n---\nThis skill bundles resource files in ${skill.dir}:\n` +
+          extras.map(f => `  - ${f}`).join('\n') +
+          `\nRead them with read_file when the steps above refer to them.`;
+      }
+    } catch { /* dir vanished — ignore */ }
+  }
+
+  return prompt;
 }
 
 /**

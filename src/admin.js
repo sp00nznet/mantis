@@ -28,6 +28,7 @@ import {
   setSessionAgent, setSessionClaudeAsk, restoreSessions, setApprovalAdminBase,
 } from './sessions.js';
 import { requestApproval, resolveApproval } from './approvals.js';
+import { mcpStatus, initMcp } from './mcp.js';
 import * as auth from './auth.js';
 import * as users from './users.js';
 import * as accounts from './accounts.js';
@@ -153,6 +154,7 @@ function buildState(req) {
       port: config.admin?.port ?? 8788,
       host: config.admin?.host ?? '127.0.0.1',
     },
+    mcp: mcpStatus(),
   };
 }
 
@@ -810,6 +812,9 @@ export function startAdmin({ port, host } = {}) {
   // Rehydrate any hub sessions persisted before the last shutdown/redeploy so
   // users don't have to reopen their chats every time.
   try { restoreSessions(); } catch { /* non-fatal — start with an empty hub */ }
+  // Connect to configured MCP servers so the Settings panel can show their
+  // status. Fire-and-forget — failures are reflected per-server in mcpStatus().
+  initMcp().catch(() => {});
   const wantPort = port || config.admin?.port || 8788;
   // With sign-in on, bind to all interfaces so other devices can reach it.
   const listenHost = host || (auth.isAuthEnabled() ? '0.0.0.0' : (config.admin?.host || '127.0.0.1'));

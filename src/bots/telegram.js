@@ -8,7 +8,8 @@
  */
 
 import { getConfig } from '../config.js';
-import { createBotSession, runBotCommand, formatResult, chunkMessage } from '../bot-core.js';
+import { runBotCommand, formatResult, chunkMessage } from '../bot-core.js';
+import { gatewaySession } from '../gateway.js';
 import { transcribeAudio } from '../transcribe.js';
 
 const TG_LIMIT = 4096;
@@ -51,11 +52,9 @@ export async function startTelegramBot() {
   console.log(`  [telegram] polling for messages — Ctrl+C to stop`);
   if (allowed.length) console.log(`  [telegram] restricted to ${allowed.length} allowed user/chat id(s)`);
 
-  const sessions = new Map(); // chatId -> session
-  function sessionFor(chatId) {
-    if (!sessions.has(chatId)) sessions.set(chatId, createBotSession());
-    return sessions.get(chatId);
-  }
+  // Persistent, gateway-owned sessions keyed by (platform, chatId). They survive
+  // a bot restart and rehydrate on the next message.
+  const sessionFor = (chatId) => gatewaySession('telegram', chatId);
 
   /** Download a Telegram file by id. Returns { buffer } or { error }. */
   async function downloadTgFile(fileId) {
