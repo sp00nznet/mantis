@@ -237,6 +237,9 @@ export function createAgent(agentOpts = {}) {
         const parsed = parseTextToolCalls(assistantMessage.content);
         if (parsed.length > 0) {
           assistantMessage.tool_calls = parsed;
+          // Drop the raw tool-call markup from the content we keep in history.
+          const cleaned = stripToolCallMarkup(assistantMessage.content);
+          assistantMessage.content = cleaned || undefined;
         }
       }
 
@@ -474,6 +477,11 @@ export async function callLLM(url, model, messages, headers, provider, { onText,
   let toolCalls = {};
   let firstToken = true;
   let usage = null;        // token-usage chunk, when the provider sends one
+  let runaway = false;     // set when repeated-token spam is detected
+  let contentLen = 0;      // total streamed content length so far
+  let lastRunawayCheck = 0;
+  let tail = '';           // rolling window of the most recent content
+  const MAX_CONTENT = 500_000;  // hard backstop against unbounded output
 
   while (true) {
     if (isCancelled()) {
@@ -531,6 +539,26 @@ export async function callLLM(url, model, messages, headers, provider, { onText,
         contentParts.push(delta.content);
         if (onToken) onToken(Math.max(1, Math.round(delta.content.length / 4)));
         onText(delta.content);
+
+        // Runaway-output guard: a degrading small model can fall into emitting
+        // the same token (classically "</function>") thousands of times. Watch
+        // a rolling tail and bail the moment a short unit repeats itself into
+        // the ground, so a wedged model can't pin the turn or poison the
+        // history with megabytes of spam.
+        contentLen += delta.content.length;
+        tail += delta.content;
+        if (tail.length > 4000) tail = tail.slice(-4000);
+        if (contentLen - lastRunawayCheck >= 800) {
+          lastRunawayCheck = contentLen;
+          if (contentLen > 1200 && tailRepetition(tail)) runaway = true;
+        }
+        if (contentLen > MAX_CONTENT) runaway = true;
+        if (runaway) {
+          try { await reader.cancel(); } catch {}
+          if (onThinking) onThinking(false);
+          if (onError) onError('⚠ runaway repetition detected — truncating output');
+          break;
+        }
       }
 
       if (delta.tool_calls) {
@@ -562,11 +590,13 @@ export async function callLLM(url, model, messages, headers, provider, { onText,
         }
       }
     }
+    if (runaway) break;
   }
 
   if (onThinking) onThinking(false);
 
-  const fullContent = contentParts.join('');
+  let fullContent = contentParts.join('');
+  if (runaway) fullContent = stripTrailingRepetition(fullContent);
   const toolCallArray = Object.values(toolCalls);
 
   const assistantMessage = { role: 'assistant' };
@@ -596,7 +626,109 @@ export async function callLLM(url, model, messages, headers, provider, { onText,
 // Parse tool calls from the model's text output.
 const _toolNames = new Set(toolDefinitions.map(t => t.function.name));
 
+// A name is callable if it's a known built-in or an MCP-qualified tool
+// (mcp__server__tool). MCP tools aren't in _toolNames since they're discovered
+// at runtime, but the mcp__ prefix is unambiguous enough to accept.
+function _isCallableName(name) {
+  return _toolNames.has(name) || (typeof name === 'string' && name.startsWith('mcp__'));
+}
+
+// Coerce a raw <parameter> body into a JS value. Qwen3-Coder emits parameter
+// values as raw text; try to recover JSON scalars/structures, else keep the
+// string verbatim.
+function coerceParamValue(raw) {
+  const v = raw.trim();
+  if (v === '') return v;
+  try { return JSON.parse(v); } catch {}
+  return v;
+}
+
+// Parse XML-style tool calls emitted by Hermes/Qwen-family models. Two shapes:
+//   1. Qwen3-Coder:  <function=NAME><parameter=P>VALUE</parameter></function>
+//      (optionally wrapped in <tool_call>...</tool_call>)
+//   2. Hermes JSON:  <tool_call>{"name":"NAME","arguments":{...}}</tool_call>
+// These models are the local/NIM default, so without this branch their tool
+// calls vanish and the model degrades into "</function>" tag-spam.
+function parseXmlToolCalls(text) {
+  const calls = [];
+
+  // Shape 1: <function=NAME> ... </function>
+  const fnRegex = /<function\s*=\s*([^>\s]+)\s*>([\s\S]*?)<\/function>/g;
+  let m;
+  while ((m = fnRegex.exec(text)) !== null) {
+    const name = m[1].trim();
+    if (!_isCallableName(name)) continue;
+    const args = {};
+    const paramRegex = /<parameter\s*=\s*([^>\s]+)\s*>([\s\S]*?)<\/parameter>/g;
+    let p;
+    while ((p = paramRegex.exec(m[2])) !== null) {
+      args[p[1].trim()] = coerceParamValue(p[2]);
+    }
+    calls.push({
+      id: `xml_${calls.length}_${Date.now()}`,
+      type: 'function',
+      function: { name, arguments: JSON.stringify(args) }
+    });
+  }
+
+  // Shape 2: <tool_call>{json}</tool_call>
+  if (calls.length === 0) {
+    const tcRegex = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g;
+    while ((m = tcRegex.exec(text)) !== null) {
+      try {
+        const obj = JSON.parse(m[1].trim());
+        if (obj.name && _isCallableName(obj.name)) {
+          calls.push({
+            id: `tc_${calls.length}_${Date.now()}`,
+            type: 'function',
+            function: { name: obj.name, arguments: JSON.stringify(obj.arguments || obj.parameters || {}) }
+          });
+        }
+      } catch {}
+    }
+  }
+
+  return calls;
+}
+
+// Strip recognized tool-call markup from assistant content once it's been
+// parsed into structured tool_calls, so the raw tags don't get replayed into
+// the model's own history on the next turn.
+function stripToolCallMarkup(text) {
+  if (!text) return text;
+  return text
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
+    .replace(/<function\s*=\s*[^>]*>[\s\S]*?<\/function>/g, '')
+    .trim();
+}
+
+// Find a short unit repeated into the tail of a string (the signature of
+// runaway token-spam). Returns { reps, unit, start } where `start` is the
+// index in `s` where the repetition run begins, or null if none qualifies.
+function tailRepetition(s) {
+  for (let L = 1; L <= 200; L++) {
+    if (L > s.length) break;
+    const unit = s.slice(s.length - L);
+    if (!unit.trim()) continue;   // ignore pure-whitespace units
+    let i = s.length - L, reps = 1;
+    while (i - L >= 0 && s.slice(i - L, i) === unit) { reps++; i -= L; }
+    if (reps >= 8 && reps * L >= 400) return { reps, unit, start: i };
+  }
+  return null;
+}
+
+// Cut a runaway repetition run off the end of a string, keeping whatever real
+// content preceded it (which may still contain a recoverable tool call).
+function stripTrailingRepetition(s) {
+  const r = tailRepetition(s);
+  return r ? s.slice(0, r.start).replace(/\s+$/, '') : s;
+}
+
 function parseTextToolCalls(text) {
+  // Strategy 0: XML/Hermes tool calls (local + NIM models default to this).
+  const xml = parseXmlToolCalls(text);
+  if (xml.length > 0) return xml;
+
   const calls = [];
 
   // Strategy 1: Extract content between ```json ... ``` code fences
@@ -651,3 +783,12 @@ function parseTextToolCalls(text) {
 
   return calls;
 }
+
+// Exposed for unit tests only — the agent loop uses these internally.
+export const _internals = {
+  parseTextToolCalls,
+  parseXmlToolCalls,
+  stripToolCallMarkup,
+  tailRepetition,
+  stripTrailingRepetition,
+};

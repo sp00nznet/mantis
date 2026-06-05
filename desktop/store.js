@@ -9,6 +9,7 @@
 import fs from 'fs';
 import path from 'path';
 import { activeDataDir } from '../src/users.js';
+import { indexSession, removeSession as dropFromIndex } from '../src/search.js';
 
 /**
  * The sessions folder for the active context — ~/.mantis/sessions when nobody
@@ -53,6 +54,13 @@ export function save(session) {
   ensureDir();
   session.updatedAt = Date.now();
   fs.writeFileSync(fileFor(session.id), JSON.stringify(session, null, 2), 'utf-8');
+  // Keep the chat searchable (best-effort; no-op without node:sqlite).
+  try {
+    indexSession({
+      source: 'desktop', sessionId: session.id, title: session.title || session.id,
+      messages: session.messages || [], ts: session.updatedAt,
+    });
+  } catch { /* search optional */ }
   return session;
 }
 
@@ -88,8 +96,10 @@ export function list() {
 }
 
 export function remove(id) {
-  try { fs.unlinkSync(fileFor(id)); return true; }
+  try { fs.unlinkSync(fileFor(id)); }
   catch { return false; }
+  try { dropFromIndex('desktop', id); } catch { /* search optional */ }
+  return true;
 }
 
 export function rename(id, title) {

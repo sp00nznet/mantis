@@ -15,6 +15,7 @@ function printUsage() {
                              cmd: install | uninstall | start | stop | status
     mantis bot telegram      Run the Telegram bot
     mantis bot discord       Run the Discord bot
+    mantis mcp-server        Expose Mantis's tools to another agent over MCP (stdio)
     mantis auth admin <u> <p>  Create/reset the admin account and enable sign-in
     mantis auth disable      Turn sign-in off (back to single-user)
     mantis auth list         List accounts
@@ -46,7 +47,11 @@ async function main() {
       loadConfig();
       const { startAdmin } = await import('../src/admin.js');
       try {
-        await startAdmin();
+        // Env overrides make container/deploy wiring easy without editing config.
+        await startAdmin({
+          host: process.env.MANTIS_ADMIN_HOST || undefined,
+          port: process.env.MANTIS_ADMIN_PORT ? Number(process.env.MANTIS_ADMIN_PORT) : undefined,
+        });
       } catch (err) {
         console.error(`  Could not start the admin panel: ${err.message}`);
         process.exit(1);
@@ -163,6 +168,15 @@ async function main() {
     case 'service': {
       const { runServiceCommand } = await import('../src/service.js');
       await runServiceCommand(process.argv.slice(3));
+      break;
+    }
+
+    case 'mcp-server': {
+      // Expose Mantis's built-in tools to another MCP client over stdio.
+      // Other agents wire it up as { command: "mantis", args: ["mcp-server"] }.
+      // Speaks JSON-RPC over stdio — must NOT write anything else to stdout.
+      const { runMcpServer } = await import('../src/mcp-server.js');
+      runMcpServer(process.argv.slice(3));
       break;
     }
 

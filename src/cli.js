@@ -4,9 +4,10 @@ import path from 'path';
 import os from 'os';
 import chalk from 'chalk';
 import ora from 'ora';
-import { createAgent } from './agent.js';
+import { createAgent, callLLM } from './agent.js';
 import { setWorkingDirectory, getWorkingDirectory, setPlanMode, getPlanMode } from './tools.js';
-import { loadConfig, saveConfig, getConfig, PROVIDERS, resolveProviderChain } from './config.js';
+import { loadConfig, saveConfig, getConfig, PROVIDERS, resolveProviderChain, buildConnection } from './config.js';
+import { search as searchMemory, searchAvailable, summarizeAndIndex } from './search.js';
 import { saveConversation, loadConversation, listConversations } from './conversation.js';
 import { getAllSkills, getSkill, saveSkill, deleteSkill, expandSkillPrompt, matchSkillCommand } from './skills.js';
 import { loadAllMemory, clearGlobalMemory, clearProjectMemory, getMemoryStats, loadHandoff, clearHandoff, parseHandoffTasks } from './memory.js';
@@ -694,6 +695,20 @@ async function handleSwarmRun(task, leadOverride, rl, agent) {
   _isBusy = false;
 }
 
+// Minimal one-shot LLM completion using the active provider — no tools, no
+// streaming. Used by `/recall summarize` to compress old sessions.
+async function llmGenerate(prompt) {
+  const cfg = getConfig();
+  const conn = buildConnection(cfg.provider, cfg.model);
+  if (!conn) throw new Error('no provider configured');
+  const msg = await callLLM(
+    conn.url, conn.model, [{ role: 'user', content: prompt }], conn.headers, conn.provider,
+    { onText: () => {}, onError: () => {}, onThinking: () => {}, onToken: () => {}, tools: [] },
+    () => false
+  );
+  return (msg && msg.content) || '';
+}
+
 async function handleCommand(cmd, rl, agent, ask) {
   const parts = cmd.split(/\s+/);
   const command = parts[0].toLowerCase();
@@ -741,6 +756,43 @@ async function handleCommand(cmd, rl, agent, ask) {
       break;
     }
 
+    case '/recall': {
+      if (!searchAvailable()) {
+        console.log(colors.dim('  Conversation search is unavailable (needs Node 22.5+ with node:sqlite).\n'));
+        break;
+      }
+      const sub = (parts[1] || '').toLowerCase();
+      if (sub === 'summarize') {
+        const n = parseInt(parts[2], 10) || 20;
+        console.log(colors.dim(`  Summarizing up to ${n} long session(s)…`));
+        try {
+          const r = await summarizeAndIndex(llmGenerate, { max: n });
+          console.log(colors.success(`  Summarized ${r.summarized}, skipped ${r.skipped}.\n`));
+        } catch (e) {
+          console.log(colors.dim(`  Summarize failed: ${e.message}\n`));
+        }
+        break;
+      }
+      if (!args.trim()) {
+        console.log(colors.dim('  Usage: /recall <query>   (also: /recall summarize [N])\n'));
+        break;
+      }
+      const results = searchMemory(args, { limit: 10 });
+      if (!results.length) {
+        console.log(colors.dim(`  No matches for "${args}".\n`));
+        break;
+      }
+      console.log('\n  ' + colors.header(`Recall — ${results.length} match(es) for "${args}"`));
+      results.forEach((r, i) => {
+        const where = r.source + (r.title ? ` · ${r.title}` : '');
+        const snip = truncate((r.snippet || '').replace(/\s+/g, ' ').trim(), 160);
+        console.log(`  ${colors.dim((i + 1) + '.')} ${colors.dim(where)}`);
+        console.log(`     ${snip}`);
+      });
+      console.log('');
+      break;
+    }
+
     case '/status':
     case '/stats': {
       const stats = agent.getStats();
@@ -779,8 +831,13 @@ async function handleCommand(cmd, rl, agent, ask) {
       } else {
         console.log('\n  ' + colors.header('MCP servers'));
         for (const s of servers) {
+          const extras = s.connected
+            ? [`${s.tools} tool${s.tools === 1 ? '' : 's'}`,
+               s.resources ? `${s.resources} resource${s.resources === 1 ? '' : 's'}` : null,
+               s.prompts ? `${s.prompts} prompt${s.prompts === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ')
+            : null;
           const state = s.connected
-            ? colors.success(`connected · ${s.tools} tool${s.tools === 1 ? '' : 's'}`)
+            ? colors.success(`connected · ${extras}`)
             : colors.error('not connected' + (s.error ? ` (${s.error})` : ''));
           console.log(`  ${s.name} ${colors.dim('(' + s.transport + ')')} — ${state}`);
         }
@@ -2018,6 +2075,7 @@ function printHelp() {
   ${colors.toolName('/image <path>')}      Attach an image to your next message (vision)
   ${colors.toolName('/plan')}              Toggle plan mode (explore without changes)
   ${colors.toolName('/status')}            Show session status (tokens, cost, model, etc.)
+  ${colors.toolName('/recall <query>')}    Search past conversations & memory (/recall summarize to compress)
   ${colors.toolName('/cd <dir>')}          Change working directory
   ${colors.toolName('/save [name]')}       Save conversation to disk
   ${colors.toolName('/load [name]')}       Load a saved conversation

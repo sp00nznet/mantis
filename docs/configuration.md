@@ -9,9 +9,12 @@ Mantis stores its configuration and data at `~/.mantis/` (that's your home direc
 ```
 ~/.mantis/
 ├── config.json           # Settings
-├── conversations/        # Saved conversation histories
-│   ├── auth-refactor.json
-│   └── conversation-2026-02-28T...json
+├── conversations/        # Saved conversation histories (/save, /load)
+├── sessions/             # Desktop chat history
+├── hub-sessions/         # Admin/hub session checkpoints
+├── gateway-sessions/     # Persisted bot conversations (per platform)
+├── search.db             # Conversation search index (FTS5) — safe to delete
+├── skills/               # Your skills (JSON or SKILL.md folders)
 └── memory/               # Global persistent memory (MEMORY.md)
 ```
 
@@ -54,6 +57,11 @@ Here's the full config with defaults:
     "telegram": { "token": "", "allowedUsers": [] },
     "discord":  { "token": "", "allowedUsers": [] }
   },
+  "gateway": {
+    "hibernateIdleMs": 1800000,
+    "sweepIntervalMs": 300000
+  },
+  "mcpServers": {},
   "admin": {
     "port": 8788,
     "host": "127.0.0.1"
@@ -77,6 +85,7 @@ Here's the full config with defaults:
 | `swarm` | object | — | Swarm-mode settings — see [Swarm Mode](swarm.md#swarm-configuration). |
 | `proxy` | object | — | Anthropic-compatible proxy settings — see [Proxy](proxy.md#tier-routing). |
 | `bots` | object | — | Telegram / Discord bot tokens — see [Chat Bots](bots.md). |
+| `gateway` | object | `{ hibernateIdleMs: 1800000, sweepIntervalMs: 300000 }` | Bot session hibernation — evict idle conversations from memory (rehydrated on next message). `0` disables. See [Chat Bots](bots.md#session-persistence--hibernation). |
 | `transcription` | object | — | Voice-note transcription — see [Chat Bots](bots.md#voice-notes). |
 | `hooks` | object | `{ afterEdit: [] }` | Shell commands run after the agent writes/edits a file. `{file}` is replaced with the path. e.g. `["npx prettier --write {file}"]`. |
 | `mcpServers` | object | `{}` | MCP servers whose tools are added to the agent — see [MCP Servers](mcp.md). |
@@ -86,8 +95,8 @@ Here's the full config with defaults:
 | `auth` | object | — | Sign-in / multi-user settings — see [Sign-in & Multi-user](auth.md). |
 
 Nested objects are deep-merged with defaults on load, so an older `config.json`
-that predates `proxy`, `hooks`, `mcpServers`, or `auth` still picks up their
-default values.
+that predates `proxy`, `hooks`, `mcpServers`, `gateway`, or `auth` still picks up
+their default values.
 
 ---
 

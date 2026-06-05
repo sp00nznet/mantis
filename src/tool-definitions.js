@@ -329,11 +329,66 @@ export const toolDefinitions = [
         required: ["text"]
       }
     }
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_skill",
+      description: "Save a reusable workflow as a skill so it can be re-run later as /<name>. Use this after you work out a non-trivial, repeatable procedure (a build/release flow, a project-specific check, a multi-step task the user is likely to want again) — capture the steps as a skill instead of relearning them next time. Skills are saved in the portable agentskills.io format.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Short kebab-case skill name (becomes the /command). e.g. 'release', 'lint-fix'"
+          },
+          description: {
+            type: "string",
+            description: "One line on what the skill does and when to use it"
+          },
+          instructions: {
+            type: "string",
+            description: "The skill body: the step-by-step procedure the agent should follow when the skill runs. Markdown. May use {{args}} for invocation arguments."
+          },
+          argument_hint: {
+            type: "string",
+            description: "Optional hint for what arguments the skill takes, e.g. '<file>' or '[branch]'"
+          },
+          scope: {
+            type: "string",
+            enum: ["user", "project"],
+            description: "'user' = available everywhere (~/.mantis/skills), 'project' = committed with this repo (.mantis/skills). Default 'user'."
+          }
+        },
+        required: ["name", "description", "instructions"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_memory",
+      description: "Search across past conversations (this and other sessions) and the memory store for relevant context. Use this to recall earlier decisions, prior work on a topic, file names, or how a problem was solved before — instead of asking the user to repeat themselves.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "What to look for — keywords or a natural-language description of the topic"
+          },
+          limit: {
+            type: "integer",
+            description: "Maximum number of results to return (default 8)"
+          }
+        },
+        required: ["query"]
+      }
+    }
   }
 ];
 
 // Read-only subset for swarm workers — no write/edit/run capabilities
 export const readOnlyToolDefinitions = toolDefinitions.filter(t =>
-  ['read_file', 'list_files', 'search_files', 'find_files', 'read_memory', 'web_fetch', 'web_search']
+  ['read_file', 'list_files', 'search_files', 'find_files', 'read_memory', 'search_memory', 'web_fetch', 'web_search']
     .includes(t.function.name)
 );

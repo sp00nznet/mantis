@@ -10,7 +10,7 @@
     "build:sea": "node scripts/build-sea.mjs",
     "build:installer": "node scripts/build-cli-installer.mjs",
     "build:all": "npm run build:sea && npm run build:installer",
-    "test": "node --test tests/"
+    "test": "node scripts/run-tests.mjs"
   },
   "dependencies": {
     "chalk": "^5.3.0",

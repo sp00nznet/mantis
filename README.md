@@ -57,6 +57,7 @@ mantis serve             # Anthropic-compatible proxy server
 mantis admin             # provider & config web UI
 mantis bot telegram      # run the Telegram bot
 mantis bot discord       # run the Discord bot
+mantis mcp-server        # expose Mantis's tools to another agent over MCP
 ```
 
 ---
@@ -66,12 +67,18 @@ mantis bot discord       # run the Discord bot
 - **23 providers** — Ollama, LM Studio, and llama.cpp locally, or 20 cloud
   providers (OpenAI, Claude, Gemini, Groq, Cerebras, NVIDIA NIM, Kimi, Z.ai, and
   more). Switch with `/provider set`. See [docs/providers.md](docs/providers.md).
-- **15 built-in tools** — reads files, writes code, runs commands, searches the
+- **17 built-in tools** — reads files, writes code, runs commands, searches the
   codebase, does surgical edits, **fetches/searches the web**, **generates images
-  and speech**. Reads before it writes; chains tools together. Plus a **sub-agent**
-  tool for delegating subtasks.
-- **MCP client** — connect [MCP servers](docs/mcp.md) (filesystem, GitHub,
-  Postgres, …) and their tools join the agent loop automatically.
+  and speech**, **searches past conversations**. Reads before it writes; chains
+  tools together. Plus a **sub-agent** tool for delegating subtasks.
+- **Conversation search** — every session, chat, and bot thread is indexed
+  (SQLite FTS5); `/recall <query>` and the agent's `search_memory` tool pull back
+  relevant context from past work instead of asking you to repeat yourself. See
+  [docs/search.md](docs/search.md).
+- **MCP — client *and* server** — connect [MCP servers](docs/mcp.md) (filesystem,
+  GitHub, Postgres, …) and their tools, resources, and prompts join the agent
+  loop automatically; or run `mantis mcp-server` to expose Mantis's own tools to
+  Claude Code, Cursor, or any other MCP client.
 - **Autonomous mode** — `/auto "build a REST API"` and Mantis plans, writes,
   builds, tests, and delivers. 100-iteration limit, tool calls auto-approved.
 - **Swarm mode** — `/swarm "refactor the auth module"` runs ALL your providers in
@@ -85,9 +92,13 @@ mantis bot discord       # run the Discord bot
 - **Headless mode** — `mantis run "<task>"` for scripts and CI (`--json` output).
 - **Anthropic-compatible proxy** — `mantis serve` lets the real Claude Code,
   VS Code, and JetBrains run on your provider pool. See [docs/proxy.md](docs/proxy.md).
-- **Docker** — `docker compose up` runs the proxy + admin UI in a container.
+- **Docker** — `docker build -t mantis .` runs the proxy + admin UI in a
+  container; all data (config, sessions, search index) persists in a `/root/.mantis`
+  volume.
 - **Chat bots** — drive Mantis from Telegram or Discord, by text or **voice note**
-  (transcribed automatically). See [docs/bots.md](docs/bots.md).
+  (transcribed automatically). Conversations now **persist across restarts** and
+  idle ones **hibernate** out of memory, rehydrating on the next message. See
+  [docs/bots.md](docs/bots.md).
 - **Desktop app** — a Claude-style Electron app: general chat with persistent,
   resumable history (projects & git on the way). See [docs/desktop.md](docs/desktop.md).
 - **Admin web UI** — `mantis admin` to manage keys, providers, and routing in a
@@ -101,7 +112,12 @@ mantis bot discord       # run the Discord bot
 - **Context management** — long conversations auto-compact instead of crashing.
 - **Persistent memory** — "save state to memory" persists notes across sessions.
 - **Skills** — 11 built-in slash commands (incl. `/research`, `/design`,
-  `/clone`) plus your own via `/skill create`.
+  `/clone`) plus your own. Skills use the portable [agentskills.io](https://agentskills.io)
+  `SKILL.md` format (shareable with Claude Code), and the agent can save a
+  reusable workflow itself with the `create_skill` tool. See [docs/skills.md](docs/skills.md).
+- **Robust tool calls** — understands native, JSON, *and* Hermes/Qwen XML
+  tool-call formats (so local Qwen-Coder models work cleanly), with a runaway-output
+  guard that truncates a model stuck repeating itself.
 - **GPU-tiered install** — the installer pulls the right model size for your GPU.
 
 ---
@@ -116,6 +132,7 @@ mantis bot discord       # run the Discord bot
 | `/undo` | Revert the last file change the agent made |
 | `/plan` | Toggle plan mode (read-only exploration) |
 | `/status` | Token usage, estimated cost, model info, stats |
+| `/recall <query>` | Search past conversations & memory (`/recall summarize` to compress) |
 | `/image <path>` | Attach an image to your next message (vision) |
 | `/mcp` | Show connected MCP servers and their tools |
 | `/cd <dir>` | Change working directory |
@@ -186,12 +203,13 @@ The full table — base URLs, default models, free-tier notes — is in
 | [Providers](docs/providers.md) | All 23 providers, base URLs, default models |
 | [Swarm Mode](docs/swarm.md) | Multi-provider parallel execution |
 | [Proxy](docs/proxy.md) | Anthropic-compatible proxy + admin UI |
-| [MCP Servers](docs/mcp.md) | Connecting MCP servers for extra tools |
+| [MCP](docs/mcp.md) | Connecting MCP servers, and running Mantis as one |
+| [Conversation Search](docs/search.md) | Full-text recall across past sessions |
 | [Session Sharing](docs/sharing.md) | Watch/join links for a live session |
 | [Sign-in & Multi-user](docs/auth.md) | Local accounts, roles, per-account workspaces |
-| [Chat Bots](docs/bots.md) | Telegram & Discord wrappers |
+| [Chat Bots](docs/bots.md) | Telegram & Discord wrappers, session persistence |
 | [Desktop App](docs/desktop.md) | The Claude-style Electron app |
-| [Tools](docs/tools.md) | The 10 built-in tools |
+| [Tools](docs/tools.md) | The 17 built-in tools |
 | [Skills](docs/skills.md) | Built-in and custom slash commands |
 | [Plan Mode](docs/plan-mode.md) | Read-only exploration mode |
 | [Memory](docs/memory.md) | Persistent cross-session memory |
@@ -203,7 +221,7 @@ The full table — base URLs, default models, free-tier notes — is in
 
 ## Requirements
 
-- **Node.js** v18+ (v22+ for the Discord bot)
+- **Node.js** v22+ (v22.5+ enables conversation search via the built-in SQLite)
 - **Ollama** — [ollama.com](https://ollama.com) (for local mode; optional if you
   use a cloud provider)
 - **RAM** — 8GB minimum, 16GB recommended

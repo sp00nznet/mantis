@@ -45,6 +45,7 @@ You have persistent memory that survives across sessions.
 - Use save_memory to save notes, state, preferences, or anything you need to remember.
 - Use read_memory to check what was previously saved.
 - Use delete_memory to clear memory when asked.
+- Use search_memory to recall relevant context from past conversations (this and other sessions) and the memory store — reach for it before asking the user to repeat earlier decisions, file names, or how something was done before.
 - When the user says "save your state", "remember this", "save to memory", or similar:
   1. First read_memory to see what's already there.
   2. Write a well-organized markdown summary with save_memory. Include:
@@ -67,7 +68,8 @@ You have persistent memory that survives across sessions.
 ## Skills
 The user can invoke skills — reusable prompt templates — via slash commands like /commit, /test, /review.
 When a skill is invoked, its prompt template is expanded and sent to you as the user's message.
-Treat skill prompts like any other user request: follow the instructions, use your tools, and complete the task.${memoryBlock}`;
+Treat skill prompts like any other user request: follow the instructions, use your tools, and complete the task.
+- When you work out a non-trivial, repeatable procedure (a build/release flow, a project-specific check, a multi-step task the user is likely to want again), use create_skill to save it so it can be re-run later as /<name>. Don't relearn the same workflow twice.${memoryBlock}`;
 
   if (mode === 'plan') {
     return base + `

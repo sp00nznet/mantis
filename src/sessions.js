@@ -18,6 +18,7 @@ import { runExternalAgent, resolveAgentSpec } from './external-agents.js';
 import { runSwarm, getSwarmPool } from './swarm.js';
 import { getConfig } from './config.js';
 import { getUserPrefs, listUsers, userHubSessionsDir } from './users.js';
+import { indexSession, removeSession as dropFromIndex } from './search.js';
 import { registerTurn, unregisterTurn } from './approvals.js';
 import { setWorkingDirectory, getWorkingDirectory } from './tools.js';
 import { truncate } from './utils.js';
@@ -389,6 +390,12 @@ function persist(session) {
       messages: session.agent?.getMessages ? session.agent.getMessages() : [],
     };
     fs.writeFileSync(sessionFile(session), JSON.stringify(data), 'utf-8');
+    // Keep the conversation searchable. Best-effort and self-disabling if the
+    // runtime lacks node:sqlite.
+    indexSession({
+      source: 'hub', sessionId: data.id, title: data.name || data.id,
+      messages: data.messages, transcript: data.scrollback || '', ts: data.createdAt || 0,
+    });
   } catch { /* best-effort — a failed checkpoint must never break a turn */ }
 }
 
@@ -485,6 +492,7 @@ export function removeSession(id) {
   // Drop the on-disk checkpoint so a deleted session doesn't resurrect on boot.
   if (session.origin === 'web') {
     try { fs.unlinkSync(sessionFile(session)); } catch { /* already gone */ }
+    try { dropFromIndex('hub', id); } catch { /* search optional */ }
   }
   _sessions.delete(id);
   return true;

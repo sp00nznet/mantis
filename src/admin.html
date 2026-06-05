@@ -404,6 +404,15 @@
           <label for="setClaudeSkipPerms" style="margin:0">Claude Code — skip permission prompts (full autonomy)</label>
         </div>
       </section>
+      <section class="card" id="cardMcp">
+        <h2>MCP servers</h2>
+        <div class="hint" style="margin-bottom:10px">
+          Model Context Protocol servers configured under "mcpServers" in config.json. Their tools
+          (and any resources) are offered to the agent. Mantis can also act as an MCP server for other
+          agents — run <code>mantis mcp-server</code>.
+        </div>
+        <div id="mcpList"><div class="hint">No MCP servers configured.</div></div>
+      </section>
       <div class="row" id="saveSettingsRow" style="margin-bottom:16px"><div></div><button onclick="saveSettings()">Save settings</button></div>
       <section class="card">
         <h2>Theme</h2>
@@ -757,9 +766,31 @@ function renderConfig() {
   document.getElementById('setPool').innerHTML = pool;
   var ea = STATE.externalAgents || {};
   document.getElementById('setClaudeSkipPerms').checked = ea.claudeSkipPermissions !== false;
+  renderMcp();
   renderThemePicker();
 
   document.getElementById('sideFoot').innerHTML = STATE.activeProvider;
+}
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function renderMcp() {
+  var el = document.getElementById('mcpList');
+  if (!el) return;
+  var servers = STATE.mcp || [];
+  if (!servers.length) { el.innerHTML = '<div class="hint">No MCP servers configured.</div>'; return; }
+  el.innerHTML = servers.map(function(s){
+    var dot = s.connected ? '#3fb950' : '#f85149';
+    var status = s.connected
+      ? (s.tools + ' tool' + (s.tools === 1 ? '' : 's')
+          + (s.resources ? ' · ' + s.resources + ' resource' + (s.resources === 1 ? '' : 's') : '')
+          + (s.prompts ? ' · ' + s.prompts + ' prompt' + (s.prompts === 1 ? '' : 's') : ''))
+      : ('not connected' + (s.error ? ' — ' + esc(s.error) : ''));
+    return '<div class="row" style="align-items:center;gap:8px;margin-bottom:6px">'
+      + '<span style="width:8px;height:8px;border-radius:50%;background:' + dot + ';display:inline-block"></span>'
+      + '<strong>' + esc(s.name) + '</strong>'
+      + '<span class="hint" style="margin:0">(' + esc(s.transport) + ')</span>'
+      + '<span class="hint" style="margin:0 0 0 auto">' + status + '</span>'
+      + '</div>';
+  }).join('');
 }
 function loadState() {
   return fetch('/api/state').then(function(r){

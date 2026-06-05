@@ -6,6 +6,7 @@ import { getConfig } from './config.js';
 import { recordChange } from './checkpoints.js';
 import { webFetch, webSearch } from './web.js';
 import { generateImage, generateSpeech } from './generate.js';
+import { search as searchMemory, searchAvailable } from './search.js';
 import {
   loadGlobalMemory, loadProjectMemory, loadAllMemory,
   saveGlobalMemory, saveProjectMemory,
@@ -83,6 +84,9 @@ export async function executeTool(name, args) {
       case 'save_memory': return saveMemoryTool(args);
       case 'read_memory': return readMemoryTool(args);
       case 'delete_memory': return deleteMemoryTool(args);
+      case 'search_memory': return searchMemoryTool(args);
+      case 'create_skill': return await createSkillTool(args);
+      case 'read_mcp_resource': return await readMcpResourceTool(args);
       case 'web_fetch': return await webFetch(args.url, args.raw);
       case 'web_search': return await webSearch(args.query);
       case 'run_subagent': return await runSubagent(args);
@@ -483,6 +487,55 @@ function readMemoryTool({ scope }) {
   }
 
   return parts.join('\n\n');
+}
+
+async function createSkillTool({ name, description, instructions, argument_hint, scope }) {
+  if (!name || !String(name).trim()) return 'A skill name is required.';
+  if (!instructions || !String(instructions).trim()) return 'Skill instructions (the procedure body) are required.';
+  const cleanName = String(name).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 50);
+  if (!cleanName) return 'Could not derive a valid skill name.';
+  const useScope = scope === 'project' ? 'project' : 'user';
+  // Saved in agentskills.io folder format so it's portable.
+  const { saveSkill } = await import('./skills.js');
+  try {
+    const filepath = saveSkill(
+      { name: cleanName, description: String(description || ''), args: String(argument_hint || ''), prompt: String(instructions) },
+      useScope,
+      { format: 'md' }
+    );
+    return `Saved skill "/${cleanName}" (${useScope} scope) to ${filepath}. It can now be invoked as /${cleanName}${argument_hint ? ' ' + argument_hint : ''}.`;
+  } catch (err) {
+    return `Failed to save skill: ${err.message}`;
+  }
+}
+
+async function readMcpResourceTool({ uri }) {
+  const { getMcpResources, readMcpResource } = await import('./mcp.js');
+  if (!uri || !String(uri).trim()) {
+    const resources = getMcpResources();
+    if (!resources.length) return 'No MCP resources are available from the connected servers.';
+    const lines = resources.map(r => `- ${r.uri}${r.name && r.name !== r.uri ? ` (${r.name})` : ''}${r.description ? ` — ${r.description}` : ''} [${r.server}]`);
+    return `Available MCP resources (pass a uri to read one):\n${lines.join('\n')}`;
+  }
+  return await readMcpResource(String(uri));
+}
+
+const _SOURCE_LABEL = { hub: 'session', desktop: 'chat', memory: 'memory', summary: 'summary', bot: 'bot chat' };
+
+function searchMemoryTool({ query, limit }) {
+  if (!query || !String(query).trim()) return 'Provide a non-empty query to search.';
+  if (!searchAvailable()) {
+    return 'Conversation search is unavailable on this runtime (requires Node 22.5+ with node:sqlite).';
+  }
+  const results = searchMemory(String(query), { limit: limit || 8 });
+  if (!results.length) return `No matches found for "${query}" in past conversations or memory.`;
+  const lines = results.map((r, i) => {
+    const where = _SOURCE_LABEL[r.source] || r.source;
+    const title = r.title ? ` "${r.title}"` : '';
+    const snip = (r.snippet || '').replace(/\s+/g, ' ').trim();
+    return `${i + 1}. [${where}${title}] ${snip}`;
+  });
+  return `Found ${results.length} match(es) for "${query}":\n\n${lines.join('\n')}`;
 }
 
 function deleteMemoryTool({ scope }) {

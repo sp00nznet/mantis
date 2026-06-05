@@ -25,6 +25,8 @@ class McpServer {
     this.name = name;
     this.spec = spec || {};
     this.tools = [];
+    this.resources = [];
+    this.prompts = [];
     this.connected = false;
     this.error = null;
     this._proc = null;
@@ -54,7 +56,42 @@ class McpServer {
 
     const res = await this._request('tools/list', {});
     this.tools = Array.isArray(res?.tools) ? res.tools : [];
+
+    // Resources and prompts are optional MCP capabilities — many servers don't
+    // implement them and answer -32601. Probe best-effort and never let their
+    // absence fail the connection.
+    try {
+      const rr = await this._request('resources/list', {});
+      this.resources = Array.isArray(rr?.resources) ? rr.resources : [];
+    } catch { this.resources = []; }
+    try {
+      const pp = await this._request('prompts/list', {});
+      this.prompts = Array.isArray(pp?.prompts) ? pp.prompts : [];
+    } catch { this.prompts = []; }
+
     this.connected = true;
+  }
+
+  /** Read an MCP resource by uri. Returns its text (or a placeholder). */
+  async readResource(uri) {
+    const res = await this._request('resources/read', { uri });
+    const parts = (res?.contents || []).map(c => {
+      if (typeof c.text === 'string') return c.text;
+      if (c.blob) return `[binary resource ${c.mimeType || ''}]`;
+      return JSON.stringify(c);
+    });
+    return parts.join('\n') || '(resource is empty)';
+  }
+
+  /** Fetch an MCP prompt template, rendered to plain text. */
+  async getPrompt(name, args) {
+    const res = await this._request('prompts/get', { name, arguments: args || {} });
+    const msgs = res?.messages || [];
+    return msgs.map(m => {
+      const c = m.content;
+      const text = Array.isArray(c) ? c.map(x => x.text || '').join('') : (c?.text || c || '');
+      return `${m.role || 'user'}: ${text}`;
+    }).join('\n\n');
   }
 
   _spawnStdio() {
@@ -219,6 +256,8 @@ function parseSse(text, id) {
 let _servers = [];
 let _toolMap = new Map();   // mcp__server__tool -> { server, toolName }
 let _toolDefs = [];         // OpenAI-format tool definitions
+let _resources = [];        // { server, uri, name, description, mimeType }
+let _prompts = [];          // { server, name, description, arguments }
 let _initPromise = null;
 
 function sanitize(s) {
@@ -253,13 +292,73 @@ export function initMcp() {
             },
           });
         }
+        for (const r of srv.resources) {
+          _resources.push({
+            server: name, uri: r.uri, name: r.name || r.uri,
+            description: r.description || '', mimeType: r.mimeType || '',
+          });
+        }
+        for (const p of srv.prompts) {
+          _prompts.push({
+            server: name, name: p.name, description: p.description || '',
+            arguments: p.arguments || [],
+          });
+        }
       } catch (err) {
         srv.error = err.message;
       }
     }
+
+    // Offer a single resource-reading tool only when some server actually
+    // exposes resources — keeps the toolset lean for small models otherwise.
+    if (_resources.length) {
+      _toolDefs.push({
+        type: 'function',
+        function: {
+          name: 'read_mcp_resource',
+          description: 'List or read context resources exposed by connected MCP servers (files, docs, data the server makes available). Call with no uri to list what is available, or with a uri to read one.',
+          parameters: {
+            type: 'object',
+            properties: {
+              uri: { type: 'string', description: 'The resource uri to read. Omit to list all available resources.' },
+            },
+          },
+        },
+      });
+    }
+
     return _toolDefs;
   })();
   return _initPromise;
+}
+
+/** All resources advertised by connected servers. */
+export function getMcpResources() {
+  return _resources;
+}
+
+/** Read an MCP resource by uri (searches all servers). Resolves to a string. */
+export async function readMcpResource(uri) {
+  const entry = _resources.find(r => r.uri === uri);
+  const srv = entry
+    ? _servers.find(s => s.name === entry.server)
+    : _servers.find(s => s.resources.some(r => r.uri === uri));
+  if (!srv) return `Error: no connected MCP server exposes resource "${uri}".`;
+  try { return await srv.readResource(uri); }
+  catch (err) { return `MCP resource error (${uri}): ${err.message}`; }
+}
+
+/** All prompt templates advertised by connected servers. */
+export function getMcpPrompts() {
+  return _prompts;
+}
+
+/** Fetch and render an MCP prompt template. */
+export async function getMcpPrompt(serverName, name, args) {
+  const srv = _servers.find(s => s.name === serverName) || _servers.find(s => s.prompts.some(p => p.name === name));
+  if (!srv) return `Error: no connected MCP server has prompt "${name}".`;
+  try { return await srv.getPrompt(name, args); }
+  catch (err) { return `MCP prompt error (${name}): ${err.message}`; }
 }
 
 /** Cached MCP tool definitions (empty until initMcp resolves). */
@@ -286,6 +385,8 @@ export function mcpStatus() {
     transport: s.isHttp ? 'http' : 'stdio',
     connected: s.connected,
     tools: s.connected ? s.tools.length : 0,
+    resources: s.connected ? s.resources.length : 0,
+    prompts: s.connected ? s.prompts.length : 0,
     error: s.error,
   }));
 }

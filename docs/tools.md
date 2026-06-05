@@ -1,6 +1,6 @@
 # Tools Reference
 
-Mantis gives the AI model 15 built-in tools to interact with your system. The model decides which tools to use and when — you just describe what you want done. Connected [MCP servers](mcp.md) add more tools on top.
+Mantis gives the AI model 17 built-in tools to interact with your system. The model decides which tools to use and when — you just describe what you want done. Connected [MCP servers](mcp.md) add more tools on top.
 
 ---
 
@@ -244,6 +244,46 @@ Clears persistent memory.
 - Cannot be undone — the file is removed from disk
 - The model uses this when asked to "forget everything" or "clear memory"
 
+## search_memory
+
+Searches across past conversations (this and other sessions, plus bot threads)
+and the memory store, so the model can recall earlier work instead of asking you
+to repeat it. See [Conversation Search](search.md).
+
+**Parameters:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `query` | string | yes | Keywords or a natural-language description of the topic |
+| `limit` | integer | no | Max results (default 8) |
+
+**Behavior:**
+- Full-text (SQLite FTS5) ranked search; returns source, title, and a snippet
+- Requires Node 22.5+ — reports "unavailable" and degrades gracefully otherwise
+- Also available to swarm workers (read-only)
+
+---
+
+## create_skill
+
+Saves a reusable workflow as a [skill](skills.md) so it can be re-run later as
+`/<name>`. The model uses this after working out a non-trivial, repeatable
+procedure.
+
+**Parameters:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `name` | string | yes | Short kebab-case skill name (becomes the `/command`) |
+| `description` | string | yes | One line on what it does and when to use it |
+| `instructions` | string | yes | The step-by-step procedure (markdown; may use `{{args}}`) |
+| `argument_hint` | string | no | Hint for arguments, e.g. `<file>` or `[branch]` |
+| `scope` | string | no | `user` (everywhere) or `project` (committed with the repo). Default `user` |
+
+**Behavior:**
+- Written in the portable agentskills.io `SKILL.md` format
+- `project` scope writes to `.mantis/skills/` so it can be committed and shared
+
+---
+
 ## web_fetch
 
 Downloads a URL and returns its content. By default HTML is stripped to readable text.
@@ -349,4 +389,7 @@ Generates spoken audio from text (text-to-speech) and saves it to a file.
 ## MCP tools
 
 When [MCP servers](mcp.md) are configured, their tools appear to the model as
-`mcp__<server>__<tool>` and are used exactly like the built-in tools.
+`mcp__<server>__<tool>` and are used exactly like the built-in tools. If a
+connected server exposes **resources**, the agent also gets a `read_mcp_resource`
+tool to list and read them. Mantis can run as an MCP server too — see
+[Mantis as an MCP server](mcp.md#mantis-as-an-mcp-server).
