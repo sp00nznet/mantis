@@ -1,6 +1,6 @@
 {
   "name": "mantis-desktop",
-  "version": "0.1.0",
+  "version": "3.6.0",
   "description": "Mantis Desktop — chat, projects, and git in a Claude-style app",
   "main": "main.js",
   "type": "module",
@@ -59,7 +59,11 @@
       ],
       "artifactName": "Mantis-Desktop-${version}-${os}-${arch}.${ext}"
     },
+    "portable": {
+      "artifactName": "Mantis-Desktop-${version}-${os}-${arch}-portable.${ext}"
+    },
     "nsis": {
+      "artifactName": "Mantis-Desktop-Setup-${version}-${os}-${arch}.${ext}",
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,

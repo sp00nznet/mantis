@@ -1,0 +1,187 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write # needed to attach binaries to a release
+
+jobs:
+  # Cheap gate the three build jobs hang off. Catches the two mistakes that
+  # otherwise cost twenty minutes of runner time to discover: a tag that
+  # disagrees with package.json, and a src/ file that no longer imports.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Every artifact name comes from package.json, so a tag that says
+      # something else would publish v3.7.0 full of 3.6.0 files.
+      - name: Tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p "require('./package.json').version")
+          test "$tag" = "$pkg" || { echo "tag $GITHUB_REF_NAME does not match package.json $pkg"; exit 1; }
+
+      - run: npm install --no-audit --no-fund
+      - run: node bin/mantis.js version
+      - run: node bin/mantis.js help
+      - run: npm test
+
+  windows:
+    runs-on: windows-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install --no-audit --no-fund
+      - run: npm run build:sea
+      # makensis isn't on the runner; build-cli-installer.mjs falls back to a
+      # portable NSIS download on its own.
+      - run: npm run build:installer
+
+      - name: Package CLI
+        shell: pwsh
+        run: |
+          $v = node -p "require('./package.json').version"
+          New-Item -ItemType Directory -Force -Path releases | Out-Null
+          Compress-Archive -Path dist/release/* -DestinationPath "releases/Mantis-CLI-$v-windows-x64.zip" -Force
+          Move-Item -Force dist/Mantis-CLI-Setup-*.exe releases/
+
+      # ELECTRON_SKIP_BINARY_DOWNLOAD must stay unset here — this is the job
+      # that actually needs the Electron binary.
+      - name: Package desktop
+        run: |
+          node scripts/sync-version.mjs
+          cd desktop
+          npm install --no-audit --no-fund
+          npm run dist:win
+
+      - name: Collect desktop artifacts
+        shell: pwsh
+        run: Move-Item -Force desktop/dist/*.exe releases/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mantis-windows
+          path: releases/
+
+  linux:
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install --no-audit --no-fund
+      # Native, unlike the GitLab pipeline, which cross-builds this on macOS
+      # because its debian runner OOMs during postject. GitHub's ubuntu runner
+      # has the headroom. If that ever changes, set TARGET_PLATFORM=linux and
+      # move this step to the macos job.
+      - run: npm run build:sea
+      - run: npm run build:installer # dpkg-deb ships on the ubuntu runner
+
+      - name: Package CLI
+        run: |
+          v=$(node -p "require('./package.json').version")
+          mkdir -p releases
+          tar -C dist/release -czf "releases/Mantis-CLI-$v-linux-x64.tar.gz" .
+          mv dist/mantis-cli_*.deb releases/
+
+      - name: Package desktop
+        run: |
+          node scripts/sync-version.mjs
+          cd desktop
+          npm install --no-audit --no-fund
+          npm run dist:linux
+
+      - name: Collect desktop artifacts
+        run: mv desktop/dist/*.AppImage desktop/dist/*.deb releases/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mantis-linux
+          path: releases/
+
+  macos:
+    runs-on: macos-latest # arm64
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install --no-audit --no-fund
+
+      # Two CLI builds from one arm64 runner. build-sea.mjs downloads the
+      # target's Node when TARGET_ARCH differs from the host, and postject
+      # and codesign both patch a Mach-O of either arch — so Intel Macs get a
+      # binary without paying for a second runner. Each build wipes dist/,
+      # hence the move into releases/ before the next one starts.
+      - name: CLI (arm64)
+        run: |
+          npm run build:sea
+          npm run build:installer
+          v=$(node -p "require('./package.json').version")
+          mkdir -p releases
+          tar -C dist/release -czf "releases/Mantis-CLI-$v-macos-arm64.tar.gz" .
+          mv "dist/Mantis-CLI-$v.pkg" "releases/Mantis-CLI-$v-macos-arm64.pkg"
+
+      - name: CLI (x64)
+        env:
+          TARGET_ARCH: x64
+        run: |
+          npm run build:sea
+          npm run build:installer
+          v=$(node -p "require('./package.json').version")
+          tar -C dist/release -czf "releases/Mantis-CLI-$v-macos-x64.tar.gz" .
+          mv "dist/Mantis-CLI-$v.pkg" "releases/Mantis-CLI-$v-macos-x64.pkg"
+
+      - name: Package desktop
+        run: |
+          node scripts/sync-version.mjs
+          cd desktop
+          npm install --no-audit --no-fund
+          npm run dist:mac
+
+      - name: Collect desktop artifacts
+        run: mv desktop/dist/*.dmg releases/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mantis-macos
+          path: releases/
+
+  # One publish step rather than three jobs each attaching their own files:
+  # concurrent writes to the same release race, and a macOS failure would
+  # otherwise leave a half-published release on the page.
+  release:
+    runs-on: ubuntu-latest
+    needs: [windows, linux, macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: releases
+          merge-multiple: true
+
+      - run: ls -lh releases/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: releases/*
+          generate_release_notes: true

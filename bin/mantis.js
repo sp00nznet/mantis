@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 import { loadConfig } from '../src/config.js';
+// esbuild inlines this at bundle time, so the SEA binary — which has no
+// package.json next to it at runtime — still knows what it is.
+import pkg from '../package.json' with { type: 'json' };
 
 function printUsage() {
   console.log(`
@@ -20,6 +23,7 @@ function printUsage() {
     mantis auth disable      Turn sign-in off (back to single-user)
     mantis auth list         List accounts
     mantis help              Show this message
+    mantis version           Print the version
 
   The proxy lets the real Claude Code CLI, VS Code, and JetBrains run on
   Mantis's provider pool — point them at it with ANTHROPIC_BASE_URL.
@@ -179,6 +183,12 @@ async function main() {
       runMcpServer(process.argv.slice(3));
       break;
     }
+
+    case 'version':
+    case '--version':
+    case '-v':
+      console.log(pkg.version);
+      break;
 
     case 'help':
     case '--help':
