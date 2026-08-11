@@ -4,6 +4,15 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    # A README edit shouldn't spend three runners. Safe next to the tag
+    # trigger above: "Path filters are not evaluated for pushes of tags",
+    # so a release still builds everything. And a commit touching both docs
+    # and code still builds — paths-ignore only skips when every changed
+    # file matches.
+    paths-ignore:
+      - '**.md'
+      - 'images/**'
+      - 'LICENSE'
   pull_request:
   workflow_dispatch:
 
