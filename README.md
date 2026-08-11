@@ -9,7 +9,7 @@
    /   \
 ```
 
-![Mantis in action](images/mantis.png)
+![Mantis in action](images/mantis-demo.gif)
 
 **Your own AI coding assistant. Local or cloud. No limits.**
 
