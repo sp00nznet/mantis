@@ -65,43 +65,12 @@ if (PLATFORM === 'win32') {
     }
   }
 
+  // There used to be a third fallback here that downloaded a portable NSIS
+  // zip. The URL it hardcoded now 404s, and a build that silently depends on
+  // one stranger's release asset staying up is not a build. Install NSIS.
   if (!makensis) {
-    step('Downloading portable NSIS');
-    const portableDir = path.join(DIST, '.nsis-portable');
-    fs.mkdirSync(portableDir, { recursive: true });
-    const zip = path.join(portableDir, 'nsis.zip');
-    // NSIS 3.10 portable build hosted by electron-builder's binaries repo.
-    const url = 'https://github.com/electron-userland/electron-builder-binaries/releases/download/nsis-3.0.4.3/nsis-3.0.4.3.7z';
-    // 7z is a pain to extract without 7z installed. Use the prebuilt NSIS
-    // .exe portable from Sourceforge instead — but that requires unzip…
-    // Simplest cross-shell option: use PowerShell + .NET to download and
-    // expand a .zip. Use NSIS Portable v3.10 from a clean zip mirror.
-    const zipUrl = 'https://github.com/idleberg/NSIS-Portable/releases/download/v3.10/NSIS-Portable.zip';
-    run('powershell', ['-NoProfile', '-Command',
-      `Invoke-WebRequest -Uri '${zipUrl}' -OutFile '${zip}'; Expand-Archive -Path '${zip}' -DestinationPath '${portableDir}' -Force`,
-    ]);
-    // The portable zip extracts to portableDir/NSIS-Portable/App/NSIS/makensis.exe
-    const candidates = [
-      path.join(portableDir, 'NSIS-Portable', 'App', 'NSIS', 'makensis.exe'),
-      path.join(portableDir, 'App', 'NSIS', 'makensis.exe'),
-      path.join(portableDir, 'NSIS', 'makensis.exe'),
-      path.join(portableDir, 'makensis.exe'),
-    ];
-    makensis = candidates.find(p => fs.existsSync(p));
-    if (!makensis) {
-      // Last resort: walk to find it.
-      const walk = (dir) => {
-        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-          const p = path.join(dir, e.name);
-          if (e.isDirectory()) { const f = walk(p); if (f) return f; }
-          else if (e.name.toLowerCase() === 'makensis.exe') return p;
-        }
-        return null;
-      };
-      makensis = walk(portableDir);
-    }
-    if (!makensis) die('Could not locate makensis.exe after extracting portable NSIS.');
-    ok(`portable NSIS extracted at ${makensis}`);
+    die('makensis not found. Install NSIS (`choco install nsis` / `winget install NSIS.NSIS`), '
+      + 'or build the desktop app first — electron-builder caches an NSIS this script will find.');
   }
 
   const outFile = path.join(DIST, `Mantis-CLI-Setup-${VERSION}.exe`);

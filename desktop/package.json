@@ -4,6 +4,7 @@
   "description": "Mantis Desktop — chat, projects, and git in a Claude-style app",
   "main": "main.js",
   "type": "module",
+  "homepage": "https://github.com/sp00nznet/mantis",
   "author": {
     "name": "Mantis",
     "email": "noreply@mantis.local"
