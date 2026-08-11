@@ -27,7 +27,50 @@ provider pool.
 
 ## Quick Start
 
-### Install
+### Download a binary
+
+Every release ships a self-contained executable with Node 22 baked in — there is
+no runtime to install first. Grab one from the
+[latest release](https://github.com/sp00nznet/mantis/releases/latest).
+
+**Windows** — `Mantis-CLI-Setup-<version>.exe` installs it and puts `mantis` on
+your PATH. Or take `Mantis-CLI-<version>-windows-x64.zip` and run it in place.
+
+**macOS** — `-macos-arm64.pkg` for Apple Silicon, `-macos-x64.pkg` for Intel.
+Both install to `/usr/local/share/mantis` and symlink `/usr/local/bin/mantis`:
+
+```bash
+sudo installer -pkg Mantis-CLI-3.6.0-macos-arm64.pkg -target /
+```
+
+**Linux** — the `.deb` uses the same layout:
+
+```bash
+sudo dpkg -i mantis-cli_3.6.0_amd64.deb
+```
+
+or run the tarball in place:
+
+```bash
+tar xzf Mantis-CLI-3.6.0-linux-x64.tar.gz && ./mantis
+```
+
+**Desktop app** — `Mantis-Desktop-Setup-<version>-win-x64.exe` (or the portable
+`.exe`), `Mantis-Desktop-<version>-mac-{arm64,x64}.dmg`, or the Linux
+`.AppImage` / `.deb`.
+
+Check it landed with `mantis version`.
+
+> **Nothing here is code-signed.** Windows SmartScreen will warn — *More info →
+> Run anyway*. macOS will refuse the first launch — right-click → *Open*, or
+> `sudo xattr -rd com.apple.quarantine /usr/local/share/mantis`.
+>
+> **The zip and tarball are a folder, not just a binary.** `mantis` sits next to
+> `admin.html`, `shared.html`, and `assets/`, which it loads from disk at
+> runtime — move the whole folder or `mantis admin` and `/share` will come up
+> blank. The `.pkg` and `.deb` handle this for you.
+
+### Or install from source
 
 **Windows** (PowerShell):
 ```powershell
