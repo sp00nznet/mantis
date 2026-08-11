@@ -81,6 +81,9 @@ jobs:
         shell: pwsh
         run: Move-Item -Force desktop/dist/*.exe releases/
 
+      - run: ls -lh releases/
+        shell: bash
+
       - uses: actions/upload-artifact@v5
         with:
           name: mantis-windows
@@ -119,6 +122,9 @@ jobs:
 
       - name: Collect desktop artifacts
         run: mv desktop/dist/*.AppImage desktop/dist/*.deb releases/
+
+      - run: ls -lh releases/
+        shell: bash
 
       - uses: actions/upload-artifact@v5
         with:
@@ -169,6 +175,9 @@ jobs:
 
       - name: Collect desktop artifacts
         run: mv desktop/dist/*.dmg releases/
+
+      - run: ls -lh releases/
+        shell: bash
 
       - uses: actions/upload-artifact@v5
         with:
