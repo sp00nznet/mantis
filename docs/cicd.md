@@ -1,95 +1,104 @@
 # CI/CD — Building & Releasing
 
-Mantis builds on a GitLab CI pipeline (`.gitlab-ci.yml`) that targets three
-shell runners — Windows, Linux, macOS — and produces:
+Mantis builds on GitHub Actions ([`.github/workflows/release.yml`](../.github/workflows/release.yml))
+across three GitHub-hosted runners — `windows-latest`, `ubuntu-latest`, and
+`macos-latest` — and publishes to the
+[Releases page](https://github.com/sp00nznet/mantis/releases) on a version tag.
 
-- **CLI single-exe** — `mantis` / `mantis.exe` via Node 22 Single Executable
-  Applications (SEA). One binary, bundled Node, no install required on the
-  target machine.
-- **CLI installer** — native installer that drops the exe into a system
-  location and adds it to `PATH`:
-  - Windows: NSIS `.exe` — `Mantis-CLI-Setup-<version>.exe`, installs to
-    `%ProgramFiles%\Mantis\`, adds to system PATH, shows up in Add/Remove
-    Programs.
-  - macOS: `.pkg` — `Mantis-CLI-<version>.pkg`, installs to
-    `/usr/local/share/mantis/`, symlinks `mantis` into `/usr/local/bin/`.
-  - Linux: `.deb` — `mantis-cli_<version>_amd64.deb`, installs to
-    `/usr/local/share/mantis/`, symlinks `mantis` into `/usr/local/bin/`.
-- **Desktop installer** — `electron-builder` output:
-  - Windows: NSIS `.exe` installer + portable `.exe`
-  - macOS: `.dmg` (unsigned — Gatekeeper warns on first launch)
-  - Linux: `AppImage` + `.deb`
+There is nothing to maintain: no self-hosted runners, no share to mount, no
+service accounts. The workflow installs what it needs per run.
 
-Artifacts land at `\\$SMB_HOST\$SMB_SHARE\mantis\<branch-or-tag>\` on the
-release SMB share, same layout as Tachyon.
+## What gets built
+
+**CLI** — `mantis` / `mantis.exe` via Node 22 Single Executable Applications
+(SEA). One binary with Node bundled in, no runtime needed on the target machine.
+
+| Asset | Notes |
+|---|---|
+| `Mantis-CLI-<v>-windows-x64.zip` | binary + sidecar files, run in place |
+| `Mantis-CLI-Setup-<v>.exe` | NSIS, installs to `%ProgramFiles%\Mantis\`, adds to PATH, appears in Add/Remove Programs |
+| `Mantis-CLI-<v>-linux-x64.tar.gz` | run in place |
+| `mantis-cli_<v>_amd64.deb` | `/usr/local/share/mantis/`, symlinks `/usr/local/bin/mantis` |
+| `Mantis-CLI-<v>-macos-{arm64,x64}.tar.gz` | run in place |
+| `Mantis-CLI-<v>-macos-{arm64,x64}.pkg` | same layout as the `.deb` |
+
+**Desktop** — `electron-builder` output:
+
+| Asset | Notes |
+|---|---|
+| `Mantis-Desktop-Setup-<v>-win-x64.exe` | NSIS installer |
+| `Mantis-Desktop-<v>-win-x64-portable.exe` | portable |
+| `Mantis-Desktop-<v>-mac-{arm64,x64}.dmg` | unsigned — Gatekeeper warns on first launch |
+| `Mantis-Desktop-<v>-linux-x86_64.AppImage` | |
+| `Mantis-Desktop-<v>-linux-amd64.deb` | |
+
+14 assets per release.
+
+## Cutting a release
+
+```bash
+# 1. Bump the one version that matters.
+#    desktop/package.json is derived from it — do not edit it by hand.
+npm version 3.7.0 --no-git-tag-version
+git commit -am "release: v3.7.0"
+git push
+
+# 2. Wait for the push build to go green (it builds everything, publishes nothing).
+
+# 3. Tag it. This is what publishes.
+git tag -a v3.7.0 -m "v3.7.0"
+git push origin v3.7.0
+```
+
+The `release` job attaches all 14 assets and writes the release notes from the
+commits since the last tag (`generate_release_notes`).
+
+**Root `package.json` is the single source of truth for the version.** It is
+compiled into the binary (`mantis version`), it names every asset, and
+`scripts/sync-version.mjs` stamps it into `desktop/package.json` before
+electron-builder runs — otherwise the desktop assets ship under a different
+number than the CLI ones in the same release. The `check` job fails a tag that
+disagrees with `package.json`, so `v3.7.0` can never contain 3.6.0 files.
 
 ## Pipeline structure
 
 ```
-build  →  test  →  package  →  deploy
+check  →  windows · linux · macos  →  release
 ```
 
-| Stage     | Runs on             | What it does |
-|-----------|---------------------|--------------|
-| `build`   | windows · linux · macos | Install npm deps for CLI + desktop |
-| `test`    | linux               | `node --test` against `tests/` (when present) |
-| `package` | windows · linux · macos | SEA-bundle CLI + electron-build desktop |
-| `deploy`  | windows             | Mount SMB share, copy all `package` artifacts |
+| Job | Runs on | What it does |
+|---|---|---|
+| `check` | ubuntu | Tag/version guard, `mantis version`, `mantis help`, `npm test` |
+| `windows` | windows-latest | SEA + NSIS installer + desktop, uploads `releases/` |
+| `linux` | ubuntu-latest | SEA + `.deb` + desktop, uploads `releases/` |
+| `macos` | macos-latest | SEA ×2 arches + `.pkg` ×2 + desktop, uploads `releases/` |
+| `release` | ubuntu | Downloads all three, publishes to the Releases page |
 
-The `deploy` job runs only on:
-- pushes to `main` / `master`
-- git tags (`v3.6.0` → `…/mantis/v3.6.0/`)
-- manual web triggers (GitLab UI → Run pipeline)
+Triggers: pushes to `main`, `v*` tags, pull requests, and manual dispatch.
+**Only a `v*` tag publishes** — everything else builds and stops, which makes a
+push to `main` a free rehearsal for the release.
 
-Merge-request pipelines build and package but skip deploy.
+`release` is a separate job rather than each platform attaching its own files:
+three jobs writing one release race each other, and a macOS failure would
+otherwise leave a half-published release on the page.
 
-## One-time runner setup
+### Things worth knowing about the jobs
 
-All three runners need **Node 22 LTS** machine-wide, on PATH for the service
-account. Quick install:
-
-| OS      | Command |
-|---------|---------|
-| Windows | `winget install OpenJS.NodeJS.LTS --scope machine` |
-| macOS   | `brew install node@22 && brew link --overwrite node@22` |
-| Linux   | `curl -fsSL https://deb.nodesource.com/setup_22.x \| sudo bash - && sudo apt install -y nodejs` |
-
-The Windows runner additionally needs:
-- PowerShell 5.1+ (built-in on Win10+)
-- `gitlab-runner` registered with `--executor shell --shell pwsh`
-- NSIS 3.x for the CLI installer: `winget install NSIS.NSIS` (or `choco install nsis`)
-
-The macOS runner additionally needs:
-- Xcode CLT (`xcode-select --install`) — electron-builder uses `hdiutil`
-
-The Linux runner additionally needs:
-- `fakeroot`, `dpkg`, `rpm` — `sudo apt install -y fakeroot dpkg rpm`
-- `libarchive-tools` (for `.deb`/`.rpm` from electron-builder)
-- **Pre-populated electron cache** if egress to github.com / npmmirror.com is
-  blocked. Symptom: `package:desktop:linux` hangs forever on `npm install` at
-  electron's postinstall. Fix:
-  ```bash
-  # On a machine that CAN reach GitHub:
-  bash scripts/runner-electron-cache.sh prepare
-  scp electron-cache-bundle.tar.gz gitlab-runner@<debian-host>:/tmp/
-
-  # On the debian-runner, as gitlab-runner user:
-  bash scripts/runner-electron-cache.sh install /tmp/electron-cache-bundle.tar.gz
-  ```
-  Re-run prepare whenever `desktop/package.json` bumps electron.
-
-## SMB deploy variables
-
-Set these as **CI/CD variables** (masked) on the GitLab project:
-
-| Variable        | Example              | Notes |
-|-----------------|----------------------|-------|
-| `SMB_HOST`      | `releases.lan`       | SMB server host or IP |
-| `SMB_SHARE`     | `releases`           | Top-level share |
-| `SMB_USER`      | `mantis-ci`          | Service account |
-| `SMB_PASSWORD`  | *(masked)*           | Account password |
-
-Resulting path: `\\$SMB_HOST\$SMB_SHARE\mantis\$CI_COMMIT_REF_SLUG\`
+- **macOS builds both CLI arches from one arm64 runner.** `build-sea.mjs`
+  downloads the target's Node when `TARGET_ARCH` differs from the host, and
+  postject and `codesign` both handle a Mach-O of either arch.
+- **`macos-latest` is arm64.** Anything that takes its architecture from the
+  host silently drops Intel — `dist:mac` passes `--x64 --arm64` explicitly for
+  exactly this reason.
+- **Windows installs NSIS per run** (`choco install nsis`) and hands the path
+  forward via `GITHUB_PATH`; choco's own PATH edit does not reach later steps in
+  the same job.
+- **Linux builds the SEA natively.** The old GitLab pipeline cross-built it on
+  macOS because that debian runner OOMed during postject; GitHub's ubuntu runner
+  has the headroom. If it ever regresses, set `TARGET_PLATFORM=linux` and move
+  the step to the macos job.
+- **Each job runs `ls -lh releases/` before uploading.** `tar` and `mv` print
+  nothing, so without it a missing asset looks exactly like a green build.
 
 ## Building locally
 
@@ -110,8 +119,9 @@ npm install
 npm run dist                 # outputs desktop/dist/<installer>
 ```
 
-Each `package` job in CI runs the equivalent of those two commands and copies
-the outputs into `releases/<os>/`, which is the path the `deploy` job reads.
+`build:installer` needs a native packaging tool on the host: NSIS on Windows
+(`winget install NSIS.NSIS` / `choco install nsis`), `pkgbuild` on macOS (built
+in), `dpkg-deb` on Linux (`sudo apt install -y dpkg`).
 
 ## Code signing
 
@@ -120,10 +130,14 @@ Builds are **currently unsigned**. Users will see:
 - macOS: Gatekeeper "Cannot be opened because the developer cannot be verified"
 - Linux: no warning (signing not expected on Linux)
 
-To enable signing later:
+To enable signing later, add repository **secrets** and reference them as `env`
+on the packaging steps:
 
-- **Windows**: add `WIN_CSC_LINK` (path or URL to `.pfx`) and `WIN_CSC_KEY_PASSWORD` CI vars. electron-builder picks them up automatically.
-- **macOS**: add an Apple Developer ID cert to the runner keychain and set `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` for notarization.
+- **Windows**: `WIN_CSC_LINK` (base64 `.pfx` or URL) and `WIN_CSC_KEY_PASSWORD`.
+  electron-builder picks them up automatically; the CLI's NSIS installer needs a
+  separate `signtool` call.
+- **macOS**: `CSC_LINK`, `CSC_KEY_PASSWORD`, plus `APPLE_ID`,
+  `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` for notarization.
 
 ## What's in v3.6 (the current build)
 

@@ -31,4 +31,4 @@ Guides for using and understanding Mantis. New here? Start with
 
 - [Tools](tools.md) — the 17 built-in tools the model can call
 - [Architecture](architecture.md) — how Mantis works under the hood
-- [CI/CD](cicd.md) — GitLab pipeline, single-exe CLI, desktop installers
+- [CI/CD](cicd.md) — GitHub Actions, cutting a release, single-exe CLI, desktop installers
