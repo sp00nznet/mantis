@@ -165,6 +165,19 @@ mantis mcp-server        # expose Mantis's tools to another agent over MCP
 
 ---
 
+## Swarm mode
+
+`/swarm "<task>"` puts every configured provider on the same task at once: one
+leads and writes the code, the rest explore the codebase as read-only workers,
+and a different provider reviews what the lead produced.
+
+![Swarm mode](images/mantis-swarm.gif)
+
+See [docs/swarm.md](docs/swarm.md) for the phases, how the lead is picked, and
+the three ways to turn it off.
+
+---
+
 ## Commands
 
 | Command | Description |
