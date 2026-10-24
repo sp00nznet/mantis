@@ -96,12 +96,13 @@ async function main() {
         else if (a === '--model') opts.model = rest[++i];
         else if (a === '--solo' || a === '--no-swarm') opts.solo = true;
         else if (a === '--swarm') opts.swarm = true;
+        else if (a === '--explore-only') { opts.swarm = true; opts.exploreOnly = true; }  // plan + read-only explorers, no edits
         else if (a === '--agent') opts.agent = rest[++i];
         else positional.push(a);
       }
       const task = positional.join(' ').trim();
       if (!task) {
-        console.error('  Usage: mantis run "<task>" [--json] [--cwd <dir>] [--provider <name>] [--model <name>] [--solo|--no-swarm|--swarm] [--agent <id>]');
+        console.error('  Usage: mantis run "<task>" [--json] [--cwd <dir>] [--provider <name>] [--model <name>] [--solo|--no-swarm|--swarm|--explore-only] [--agent <id>]');
         process.exit(1);
       }
       const { runHeadless } = await import('../src/headless.js');

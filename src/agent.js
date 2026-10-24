@@ -42,11 +42,11 @@ export function createRateLimiter() {
         let remaining = waitSec;
         const interval = setInterval(() => {
           remaining--;
-          if (remaining > 0) process.stdout.write(`\r  ${reason} — ${remaining}s        `);
+          if (remaining > 0) process.stderr.write(`\r  ${reason} — ${remaining}s        `);
         }, 1000);
         await new Promise(r => setTimeout(r, waitMs));
         clearInterval(interval);
-        process.stdout.write('\r                                                              \r');
+        process.stderr.write('\r                                                              \r');
       } else {
         await new Promise(r => setTimeout(r, waitMs));
       }
@@ -426,12 +426,12 @@ export async function callLLM(url, model, messages, headers, provider, { onText,
             const countdownInterval = setInterval(() => {
               remaining--;
               if (remaining > 0) {
-                process.stdout.write(`\r  ${cls.message} — waiting ${remaining}s (attempt ${attempt + 1}/${maxRetries})  `);
+                process.stderr.write(`\r  ${cls.message} — waiting ${remaining}s (attempt ${attempt + 1}/${maxRetries})  `);
               }
             }, 1000);
             await new Promise(r => setTimeout(r, waitSec * 1000));
             clearInterval(countdownInterval);
-            process.stdout.write('\r  Retrying...                                           \n');
+            process.stderr.write('\r  Retrying...                                           \n');
           } else {
             await new Promise(r => setTimeout(r, waitMs));
           }

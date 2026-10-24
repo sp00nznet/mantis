@@ -305,7 +305,7 @@ async function runWorker(workerEntry, subtask, onStatus, isCancelled, prefs) {
 
   let fullResponse = '';
   let loopCount = 0;
-  const maxLoops = 5; // Workers get fewer loops — they're read-only
+  const maxLoops = getConfig().swarm?.workerMaxLoops || 5; // Workers get fewer loops — they're read-only
 
   while (loopCount < maxLoops) {
     if (isCancelled()) return { id: subtask.id, provider: workerEntry.key, result: null, error: 'Cancelled' };
@@ -340,6 +340,18 @@ async function runWorker(workerEntry, subtask, onStatus, isCancelled, prefs) {
     }
   }
 
+  // Out of loops while still calling tools: one last turn without tools, so the reading isn't wasted.
+  // (Text written between tool calls is narration, "now let me read X", not findings, so it's replaced.)
+  const last = messages[messages.length - 1];
+  if (!isCancelled() && (last?.role === 'tool' || !fullResponse.trim()) && messages.length > 2) {
+    fullResponse = '';
+    messages.push({ role: 'user', content: 'Stop exploring. Report what you found for the task, with file paths and line numbers.' });
+    await callLLM(conn.url, conn.model, messages, conn.headers, conn.provider, {
+      onText: (text) => { fullResponse += text; }, onError: () => {}, onThinking: () => {}, onToken: () => {},
+      rateLimiter, tools: [], getFallback: swarmGetFallback(conn.providerKey, prefs),
+    }, isCancelled);
+  }
+
   return {
     id: subtask.id,
     provider: workerEntry.key,
@@ -352,12 +364,13 @@ async function runWorker(workerEntry, subtask, onStatus, isCancelled, prefs) {
  * Run a single worker with 30s timeout. On failure, retry on a fallback worker.
  */
 async function runWorkerWithFallback(worker, subtask, allWorkers, onStatus, isCancelled, prefs) {
+  const workerTimeoutMs = getConfig().swarm?.workerTimeoutMs || 30_000;  // free tiers' rate limits can need longer
   // Try primary worker
   try {
     if (onStatus) onStatus('explore-start', worker.key, subtask.description);
     const result = await Promise.race([
       runWorker(worker, subtask, onStatus, isCancelled, prefs),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Worker timeout (30s)')), 30_000)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`Worker timeout (${workerTimeoutMs / 1000}s)`)), workerTimeoutMs)),
     ]);
     if (result.error && !isCancelled()) {
       // Primary failed — try fallback
@@ -366,7 +379,7 @@ async function runWorkerWithFallback(worker, subtask, allWorkers, onStatus, isCa
         if (onStatus) onStatus('fallback', fallback.key, `retrying ${subtask.id} (was ${worker.key})`);
         return await Promise.race([
           runWorker(fallback, subtask, onStatus, isCancelled, prefs),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Fallback timeout (30s)')), 30_000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error(`Fallback timeout (${workerTimeoutMs / 1000}s)`)), workerTimeoutMs)),
         ]);
       }
     }
@@ -380,7 +393,7 @@ async function runWorkerWithFallback(worker, subtask, allWorkers, onStatus, isCa
       try {
         return await Promise.race([
           runWorker(fallback, subtask, onStatus, isCancelled, prefs),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Fallback timeout (30s)')), 30_000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error(`Fallback timeout (${workerTimeoutMs / 1000}s)`)), workerTimeoutMs)),
         ]);
       } catch (err2) {
         return { id: subtask.id, provider: fallback.key, result: null, error: err2.message };
@@ -877,7 +890,7 @@ export function runSwarm(task, callbacks = {}, options = {}) {
 
 async function _runSwarmInner(task, callbacks, options, isCancelled) {
   const { onStatus, onText, onToolCall, onToolResult } = callbacks;
-  const { leadOverride, prefs } = options;
+  const { leadOverride, prefs, exploreOnly } = options;
 
   const startTime = Date.now();
   const pool = getSwarmPool(prefs);
@@ -888,7 +901,7 @@ async function _runSwarmInner(task, callbacks, options, isCancelled) {
   }
 
   const complexity = classifyComplexity(task);
-  const lead = selectLead(pool, leadOverride, task);
+  const lead = selectLead(pool, leadOverride || getConfig().swarm?.leadProvider, task);  // the configured lead was documented but ignored
   const workers = pool.filter(p => p.key !== lead.key);
 
   if (onStatus) onStatus('pool', lead.key, { pool: pool.map(p => p.key), lead: lead.key, count: pool.length, complexity });
@@ -914,7 +927,9 @@ async function _runSwarmInner(task, callbacks, options, isCancelled) {
   let mergedContext;
   if (plan.explore.length > 0) {
     if (onStatus) onStatus('phase', null, 'EXPLORE');
-    const exploreResults = await runParallelExplorers(plan.explore, workers, onStatus, isCancelled, prefs);
+    // With only one other provider, every explorer would queue on it and hit its rate limit; let the lead explore too.
+    const explorers = workers.length >= 2 ? workers : pool;
+    const exploreResults = await runParallelExplorers(plan.explore, explorers, onStatus, isCancelled, prefs);
     if (isCancelled()) return { success: false };
 
     mergedContext = mergeExplorationResults(exploreResults);
@@ -927,6 +942,13 @@ async function _runSwarmInner(task, callbacks, options, isCancelled) {
     }
   } else {
     mergedContext = '(no exploration needed)';
+  }
+
+  // --explore-only: hand back what the explorers found and stop. Nothing is edited; another agent
+  // (factory's Claude Code job, say) does the work with this as its head start.
+  if (exploreOnly) {
+    if (onText) onText(mergedContext || '(exploration returned nothing useful)');
+    return { success: true, exploreOnly: true, totalProviders: pool.length, elapsed: Date.now() - startTime };
   }
 
   // Phase 3: Code Writing (architect/editor split, or fallback if exploration failed)

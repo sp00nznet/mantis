@@ -73,6 +73,25 @@ User: /swarm refactor the auth module
 
 ---
 
+## Explore only
+
+`mantis run "<task>" --explore-only --json --cwd <repo>` runs PLAN and EXPLORE and stops: the
+merged findings come back as the answer and nothing is edited. It's for handing a head start to
+another agent (factory gives it to its Claude Code job). It refuses to run with fewer than
+`swarm.minPoolSize` providers rather than falling back to the single agent, which can write. With
+only one provider besides the lead, the lead explores too, so the work doesn't queue behind one
+rate limit.
+
+Settings for slow or rate-limited free tiers:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `swarm.leadProvider` | none | the lead, unless `--lead` names one |
+| `swarm.workerTimeoutMs` | 30000 | how long an explorer may take |
+| `swarm.workerMaxLoops` | 5 | tool rounds per explorer; when they run out it gets one last turn, without tools, to report |
+
+---
+
 ## Architect / Editor split
 
 Inspired by [Aider's research](https://aider.chat/2024/09/26/architect.html)

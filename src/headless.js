@@ -75,6 +75,12 @@ export async function runHeadless(task, opts = {}) {
   const swarmDefault = !!cfg.swarm?.default;
   const minPool = cfg.swarm?.minPoolSize ?? 2;
   const wantSwarm = opts.swarm || (!opts.solo && swarmDefault);
+  if (opts.exploreOnly && getSwarmPool().length < minPool) {
+    // Never fall through to the single agent below: it has write tools.
+    process.stderr.write(`  [swarm] --explore-only needs ${minPool}+ providers with keys; nothing was run
+`);
+    return false;
+  }
   if (wantSwarm && getSwarmPool().length >= minPool) {
     let swarmText = '';
     const tools = [];
@@ -83,10 +89,11 @@ export async function runHeadless(task, opts = {}) {
         if (type === 'pool') process.stderr.write(`  [swarm] pool: ${data.pool.join(', ')} | lead: ${data.lead}\n`);
         else if (type === 'phase') process.stderr.write(`  [swarm] phase ${data || provider}\n`);
         else if (type === 'error') process.stderr.write(`  [swarm error] ${provider || ''}: ${data}\n`);
+        else process.stderr.write(`  [swarm ${type}] ${provider || ''}: ${typeof data === 'string' ? data : JSON.stringify(data)}\n`);
       },
       onText: (t) => { swarmText += t; if (!json) process.stdout.write(t); },
       onToolCall: (name) => { tools.push(name); process.stderr.write(`  [tool] ${name}\n`); },
-    });
+    }, { exploreOnly: !!opts.exploreOnly });
     let result;
     try { result = await swarm.promise; }
     catch (err) { result = { success: false }; process.stderr.write(`  [swarm fatal] ${err.message}\n`); }
