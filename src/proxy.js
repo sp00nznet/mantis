@@ -17,6 +17,7 @@ import { getConfig, PROVIDERS, buildConnection } from './config.js';
 import { detectProbe, extractText } from './probes.js';
 import { handleAdminRequest } from './admin.js';
 import { classifyHttpError, anthropicErrorType, anthropicHttpStatus } from './errors.js';
+import { recordUsage, usageSummary } from './usage.js';
 
 // ─── ID helpers ─────────────────────────────────────────────────────
 
@@ -140,7 +141,7 @@ export function anthropicToOpenAI(body, model) {
     }
   }
 
-  const req = { model, messages, stream: true };
+  const req = { model, messages, stream: true, stream_options: { include_usage: true } };  // token counts for /usage
   if (typeof body.max_tokens === 'number') req.max_tokens = body.max_tokens;
   if (typeof body.temperature === 'number') req.temperature = body.temperature;
   if (typeof body.top_p === 'number') req.top_p = body.top_p;
@@ -484,6 +485,7 @@ async function handleMessages(req, res, bodyStr) {
     try { errText = await upstream.text(); } catch { /* ignore */ }
     const cls = classifyHttpError(upstream.status, errText, upstream.headers);
     log(`upstream ${upstream.status} (${cls.kind}): ${errText.slice(0, 160)}`);
+    recordUsage(providerKey, conn.model, tier, null, upstream.headers, false);
     return sendError(
       res,
       anthropicHttpStatus(cls.kind),
@@ -501,6 +503,7 @@ async function handleMessages(req, res, bodyStr) {
     const sink = makeStreamSink(res, anthropicModel, inputTokens);
     try {
       const { stopReason, usage } = await consumeUpstream(upstream, sink);
+      recordUsage(providerKey, conn.model, tier, usage, upstream.headers);
       sink.finish(stopReason, usage);
     } catch (err) {
       sink.error('api_error', `Stream failed: ${err.message}`);
@@ -509,6 +512,7 @@ async function handleMessages(req, res, bodyStr) {
     const sink = makeBufferSink();
     try {
       const { stopReason, usage } = await consumeUpstream(upstream, sink);
+      recordUsage(providerKey, conn.model, tier, usage, upstream.headers);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(sink.build(anthropicModel, stopReason, inputTokens, usage)));
     } catch (err) {
@@ -585,6 +589,12 @@ async function handleRequest(req, res) {
   if (url === '/' || url === '/health') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Mantis proxy is running. POST /v1/messages — admin UI at /admin\n');
+    return;
+  }
+
+  if (url === '/usage' && req.method === 'GET') {  // per-provider counts for dashboards (src/usage.js)
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(usageSummary()));
     return;
   }
 

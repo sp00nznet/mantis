@@ -107,6 +107,7 @@ Anything that could carry real meaning is always forwarded. Set
 | `GET /v1/models` | Model catalogue for client model pickers |
 | `GET /admin` | Admin UI (loopback only) |
 | `GET /health` | Liveness check |
+| `GET /usage` | Requests and tokens per provider (today, 7 days), the latest `x-ratelimit-*` headers, which providers have keys (names only) and which tiers route to them. Counts live in `~/.mantis/usage.jsonl` (`src/usage.js`) |
 
 The proxy translates both directions: system prompts, multi-turn history, tool
 definitions, `tool_use` / `tool_result` blocks, images, and streaming SSE
